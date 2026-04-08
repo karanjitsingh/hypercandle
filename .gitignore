@@ -1,3 +1,4 @@
 /target
 .cache/
-*.lz4
+# Allow test fixtures
+!tests/fixtures/**/*.lz4
