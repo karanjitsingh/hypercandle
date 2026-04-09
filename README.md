@@ -1,6 +1,6 @@
 # hypercandle
 
-Rust CLI tool and library to build candle (OHLCV) data from [Hyperliquid's](https://hyperliquid.xyz) historical S3 fills data.
+Rust CLI tool and library to build candle (OHLCV) data from Hyperliquid's historical S3 fills data.
 
 ## How it works
 
