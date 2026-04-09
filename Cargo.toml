@@ -3,6 +3,8 @@ name = "hyperliquid-ohlcv"
 version = "0.1.0"
 edition = "2021"
 description = "Build OHLCV candle data from Hyperliquid's historical S3 fills"
+authors = ["kjsingh"]
+license = "MIT"
 
 [lib]
 name = "hl_candles"
