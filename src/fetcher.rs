@@ -3,7 +3,7 @@ use aws_sdk_s3::Client;
 use std::path::Path;
 
 use crate::cache;
-use crate::{S3_BUCKET, S3_PREFIX};
+use crate::{DataSource, S3_BUCKET};
 
 /// Fetch an hourly fills file from S3, using local cache if available.
 /// Returns the raw LZ4-compressed bytes.
@@ -12,14 +12,15 @@ pub async fn fetch_hourly(
     cache_dir: &Path,
     date: &str,
     hour: u8,
+    source: DataSource,
 ) -> Result<Vec<u8>> {
-    // Check cache first
     if let Some(path) = cache::get_cached(cache_dir, date, hour) {
         eprintln!("cache hit: {date}/{hour}.lz4");
         return std::fs::read(&path).context("reading cached file");
     }
 
-    let key = format!("{S3_PREFIX}/{date}/{hour}.lz4");
+    let prefix = source.s3_prefix();
+    let key = format!("{prefix}/{date}/{hour}.lz4");
     eprintln!("downloading: s3://{S3_BUCKET}/{key}");
 
     let resp = client

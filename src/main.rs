@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use chrono::NaiveDate;
 use clap::Parser;
-use hl_candles::{candle, fetcher, parser, Market};
+use hl_candles::{candle, fetcher, parser, DataSource, Market};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -55,10 +55,14 @@ async fn main() -> Result<()> {
     let mut date = start;
     while date <= end {
         let date_str = date.format("%Y%m%d").to_string();
+        let source = DataSource::for_date(&date_str);
+        if date == start || DataSource::for_date(&(date - chrono::Duration::days(1)).format("%Y%m%d").to_string()) != source {
+            eprintln!("source: {:?} for {date_str}", source);
+        }
         for hour in 0..24u8 {
-            match fetcher::fetch_hourly(&client, &cli.cache_dir, &date_str, hour).await {
+            match fetcher::fetch_hourly(&client, &cli.cache_dir, &date_str, hour, source).await {
                 Ok(data) => {
-                    let trades = parser::parse_fills(&data, coin)?;
+                    let trades = parser::parse_fills(&data, coin, source)?;
                     eprintln!("  {date_str}/{hour}: {} trades", trades.len());
                     all_trades.extend(trades);
                 }
