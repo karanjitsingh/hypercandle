@@ -20,7 +20,7 @@ use crate::DataSource;
 // -- FillsByBlock format: each line is a block --
 #[derive(Debug, Deserialize)]
 struct Block {
-    events: Vec<(String, Fill)>,
+    events: Vec<(serde::de::IgnoredAny, Fill)>,
 }
 
 // -- Fill schema shared by FillsByBlock and NodeFills --
@@ -108,7 +108,7 @@ fn parse_node_fills(text: &str, coin: &str) -> Result<Vec<Trade>> {
     let mut seen = HashSet::new();
     for line in text.lines().filter(|l| !l.is_empty()) {
         if !line.contains(&filter) { continue; }
-        let (_addr, fill): (String, Fill) =
+        let (_addr, fill): (serde::de::IgnoredAny, Fill) =
             serde_json::from_str(line).context("parsing node_fill JSON")?;
         if let Some(t) = extract_fill(&fill, coin, &mut seen)? {
             trades.push(t);
