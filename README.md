@@ -1,4 +1,4 @@
-# hl-candles
+# hyperliquid-ohlcv
 
 Rust CLI tool and library to build candle (OHLCV) data from [Hyperliquid's](https://hyperliquid.xyz) historical S3 fills data. Works for any coin — perp or spot.
 
@@ -14,62 +14,100 @@ Each downloaded file is cached locally so subsequent runs don't re-download (the
 - AWS credentials configured (any method — env vars, `~/.aws/credentials`, SSO, etc.)
   - You pay S3 transfer costs (requester-pays bucket)
 
-## Install
-
-```bash
-cargo install --path .
-```
-
 ## Usage
 
+Three subcommands: `fetch`, `build`, and `consolidate`.
+
+### `fetch` — Download raw S3 data
+
+Download hourly LZ4 files to local cache without building candles.
+
 ```bash
-# BTC perp 1-hour candles for a single day
-hl-candles --coin BTC --start 20250801 --interval 1h
+# Fetch a single day
+hl-candles fetch --start 20250801
 
-# ETH perp 5-minute candles for a date range, CSV output
-hl-candles --coin ETH --start 20250801 --end 20250803 --interval 5m --format csv
+# Fetch a date range
+hl-candles fetch --start 20250801 --end 20250831
+```
 
-# BTC spot (BTCUSDC) 1-day candles
-hl-candles --coin BTCUSDC --market spot --start 20250801 --end 20250831 --interval 1d
+### `build` — Build candles from S3 fills
+
+```bash
+# BTC perp 1-minute candles for a single day
+hl-candles build --coin BTC --start 20250801 --interval 1m
+
+# ETH perp 1-hour candles for a date range
+hl-candles build --coin ETH --start 20250801 --end 20250803 --interval 1h
+
+# BTC spot (BTCUSDC) 1-minute candles
+hl-candles build --coin BTCUSDC --market spot --start 20250801 --interval 1m
 
 # HYPE spot candles
-hl-candles --coin HYPEUSDC --market spot --start 20260401 --interval 1h
+hl-candles build --coin HYPEUSDC --market spot --start 20260401 --interval 1h
+```
+
+### `consolidate` — Merge smaller candles into larger intervals
+
+```bash
+# Consolidate 1m candles into 30m
+hl-candles consolidate --coin BTC --start 20250801 --end 20250831 --from 1m --to 30m
+
+# Consolidate 1m candles into 1h
+hl-candles consolidate --coin BTC --start 20250801 --end 20250831 --from 1m --to 1h
 ```
 
 ### Options
 
+#### Global
+
+| Flag | Description |
+|------|-------------|
+| `--benchmark` | Enable tracing instrumentation for performance profiling |
+
+#### `fetch`
+
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--coin` | required | Coin symbol. For perp: `BTC`, `ETH`, `SOL`, etc. For spot: pair like `BTCUSDC`, `ETHUSDC`, `HYPEUSDC` |
+| `--start` | required | Start date (`YYYYMMDD`) |
+| `--end` | same as start | End date inclusive (`YYYYMMDD`) |
+
+#### `build`
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--coin` | required | Coin symbol. Perp: `BTC`, `ETH`, `SOL`. Spot: `BTCUSDC`, `ETHUSDC`, `HYPEUSDC` |
 | `--market` | `perp` | `perp` or `spot` |
 | `--start` | required | Start date (`YYYYMMDD`) |
 | `--end` | same as start | End date inclusive (`YYYYMMDD`) |
-| `--interval` | `1h` | Candle interval: `1m`, `5m`, `15m`, `1h`, `4h`, `1d` |
-| `--cache-dir` | `cache` | Local cache directory for downloaded S3 objects |
-| `--format` | `json` | Output format: `json` or `csv` |
+| `--interval` | `1h` | Candle interval: `1m`, `5m`, `15m`, `30m`, `1h`, `4h`, `1d` |
+
+#### `consolidate`
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--coin` | required | Coin symbol (same as build) |
+| `--market` | `perp` | `perp` or `spot` |
+| `--start` | required | Start date (`YYYYMMDD`) |
+| `--end` | same as start | End date inclusive (`YYYYMMDD`) |
+| `--from` | required | Source interval to read from (e.g. `1m`) |
+| `--to` | required | Target interval to consolidate into (e.g. `30m`, `1h`, `1d`) |
 
 ### Output
 
-JSON output (array of candle objects):
-```json
-[
-  {
-    "open_time": 1754006400000,
-    "close_time": 1754009999999,
-    "open": "115724.0",
-    "high": "115925.0",
-    "low": "115200.0",
-    "close": "115500.0",
-    "volume": "1234.56",
-    "trades": 15000
-  }
-]
-```
+Candles are written as CSV files to `data/candles/{market}/{coin}/{interval}/{date}.csv` (build) or `data/consolidated/{market}/{coin}/{interval}/{date}.csv` (consolidate).
 
-CSV output:
 ```
 open_time,close_time,open,high,low,close,volume,trades
 1754006400000,1754009999999,115724.0,115925.0,115200.0,115500.0,1234.56,15000
+```
+
+Build progress is printed per day:
+```
+market: perp, coin: BTC
+[1/3] 20250801 24 candles, 564339 trades (1.5s, total 1.5s, 0 fetched/24 cached)
+[2/3] 20250802 24 candles, 269790 trades (1.0s, total 2.5s, 0 fetched/24 cached)
+[3/3] 20250803 24 candles, 220477 trades (0.7s, total 3.2s, 0 fetched/24 cached)
+done
 ```
 
 ## Coin metadata
@@ -131,11 +169,11 @@ use hl_candles::{fetcher, parser, candle, DataSource};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let client = fetcher::create_client().await;
-    let cache_dir = std::path::Path::new("cache");
-    let source = DataSource::for_date("20250801");
+    let data_dir = std::path::Path::new("data");
+    let sources = DataSource::for_date("20250801");
 
-    let data = fetcher::fetch_hourly(&client, cache_dir, "20250801", 0, source).await?;
-    let trades = parser::parse_fills(&data, "BTC", source)?;
+    let data = fetcher::fetch_hourly(&client, data_dir, "20250801", 0, sources[0]).await?;
+    let trades = parser::parse_fills(&data, "BTC", sources[0])?;
     let candles = candle::aggregate(&trades, candle::parse_interval("1h").unwrap());
 
     for c in &candles {
@@ -195,6 +233,18 @@ This ensures each day produces exactly 24 hourly candles with no gaps or overlap
 - Hyperliquid does **not** provide historical candle data via S3 — you must build candles from fills yourself, which is what this tool does.
 - **Docs**: https://hyperliquid.gitbook.io/hyperliquid-docs/historical-data
 
+## Performance
+
+Processing is parallelized across CPU cores using rayon. A JSON pre-filter skips ~88% of lines that don't contain the target coin before deserialization.
+
+| Metric | Value |
+|---|---|
+| Per day (from cache) | ~1.5s |
+| Per day (downloading) | ~20s (depends on network) |
+| Full history (384 days, BTC, from cache) | ~10 min |
+
+Use `--benchmark` to enable tracing instrumentation for per-function timing.
+
 ## Tests
 
 ```bash
@@ -207,4 +257,4 @@ Tests use a small LZ4 fixture extracted from real data — no S3 access needed.
 
 Each hourly file is 20-80 MB compressed. A full day is ~24 files. The S3 bucket is requester-pays, so you're charged for GET requests and data transfer. Files are cached locally after first download to avoid repeat costs.
 
-Estimated cost to download all available data (~257 days): **~$16.50** (~145 GB at $0.114/GB transfer from ap-northeast-1).
+Estimated cost to download all available data (~384 days): **~$25** (~220 GB at $0.114/GB transfer from ap-northeast-1).
