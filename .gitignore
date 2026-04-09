@@ -1,5 +1,8 @@
 /target
+/target
 /data/s3
 /.cache
+/debug
+/release
 # Allow test fixtures
 !tests/fixtures/**/*.lz4
