@@ -28,7 +28,13 @@ pub fn get_cached(data_dir: &Path, date: &str, hour: u8, source: DataSource) -> 
 }
 
 /// Write raw bytes to cache, creating directories as needed.
-pub fn write_cache(data_dir: &Path, date: &str, hour: u8, source: DataSource, data: &[u8]) -> Result<PathBuf> {
+pub fn write_cache(
+    data_dir: &Path,
+    date: &str,
+    hour: u8,
+    source: DataSource,
+    data: &[u8],
+) -> Result<PathBuf> {
     let p = cache_path(data_dir, date, hour, source);
     if let Some(parent) = p.parent() {
         std::fs::create_dir_all(parent)?;

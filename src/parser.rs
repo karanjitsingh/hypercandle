@@ -30,8 +30,8 @@ struct Fill {
     px: String,
     sz: String,
     side: String,
-    time: u64,  // epoch ms
-    tid: u64,   // trade ID, used for deduplication
+    time: u64, // epoch ms
+    tid: u64,  // trade ID, used for deduplication
 }
 
 // -- NodeTrades format: different schema, ISO timestamps --
@@ -41,8 +41,8 @@ struct NodeTrade {
     px: String,
     sz: String,
     side: String,
-    time: String,  // ISO 8601 e.g. "2025-03-31T23:59:59.962208772"
-    hash: String,  // tx hash, used for deduplication (no tid in this format)
+    time: String, // ISO 8601 e.g. "2025-03-31T23:59:59.962208772"
+    hash: String, // tx hash, used for deduplication (no tid in this format)
 }
 
 /// A normalized trade extracted from any of the three formats.
@@ -90,7 +90,9 @@ fn parse_fills_by_block(text: &str, coin: &str) -> Result<Vec<Trade>> {
     let mut trades = Vec::new();
     let mut seen = HashSet::new();
     for line in text.lines().filter(|l| !l.is_empty()) {
-        if !line.contains(&filter) { continue; }
+        if !line.contains(&filter) {
+            continue;
+        }
         let block: Block = serde_json::from_str(line).context("parsing block JSON")?;
         for (_addr, fill) in &block.events {
             if let Some(t) = extract_fill(fill, coin, &mut seen)? {
@@ -107,7 +109,9 @@ fn parse_node_fills(text: &str, coin: &str) -> Result<Vec<Trade>> {
     let mut trades = Vec::new();
     let mut seen = HashSet::new();
     for line in text.lines().filter(|l| !l.is_empty()) {
-        if !line.contains(&filter) { continue; }
+        if !line.contains(&filter) {
+            continue;
+        }
         let (_addr, fill): (serde::de::IgnoredAny, Fill) =
             serde_json::from_str(line).context("parsing node_fill JSON")?;
         if let Some(t) = extract_fill(&fill, coin, &mut seen)? {

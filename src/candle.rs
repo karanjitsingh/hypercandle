@@ -113,8 +113,12 @@ pub fn consolidate(candles: &[Candle], target_interval_ms: u64) -> Vec<Candle> {
 
         match current.as_mut() {
             Some(cur) if cur.open_time == bucket_start => {
-                if c.high > cur.high { cur.high = c.high; }
-                if c.low < cur.low { cur.low = c.low; }
+                if c.high > cur.high {
+                    cur.high = c.high;
+                }
+                if c.low < cur.low {
+                    cur.low = c.low;
+                }
                 cur.close = c.close;
                 cur.volume += c.volume;
                 cur.trades += c.trades;
@@ -151,9 +155,13 @@ pub fn read_csv(path: &std::path::Path) -> anyhow::Result<Vec<Candle>> {
     let mut candles = Vec::new();
     for (i, line) in reader.lines().enumerate() {
         let line = line?;
-        if i == 0 { continue; } // skip header
+        if i == 0 {
+            continue;
+        } // skip header
         let cols: Vec<&str> = line.split(',').collect();
-        if cols.len() < 8 { continue; }
+        if cols.len() < 8 {
+            continue;
+        }
         candles.push(Candle {
             open_time: cols[0].parse()?,
             close_time: cols[1].parse()?,

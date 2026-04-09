@@ -36,15 +36,17 @@ struct Token {
 pub async fn resolve_spot_coin(pair: &str) -> Result<String> {
     let meta = fetch_spot_meta().await?;
 
-    let token_names: HashMap<u32, &str> = meta.tokens.iter().map(|t| (t.index, t.name.as_str())).collect();
+    let token_names: HashMap<u32, &str> = meta
+        .tokens
+        .iter()
+        .map(|t| (t.index, t.name.as_str()))
+        .collect();
 
     // Normalize separators: BTC/USDC, BTC-USDC, BTC_USDC → BTCUSDC
     let normalized = pair.to_uppercase().replace(['/', '-', '_'], "");
 
     // Wrapped token aliases for spot markets
-    let aliases: &[(&str, &str)] = &[
-        ("BTC", "UBTC"), ("ETH", "UETH"), ("SOL", "USOL"),
-    ];
+    let aliases: &[(&str, &str)] = &[("BTC", "UBTC"), ("ETH", "UETH"), ("SOL", "USOL")];
 
     for sp in &meta.universe {
         let base = token_names.get(&sp.tokens[0]).unwrap_or(&"?");
@@ -81,7 +83,11 @@ async fn fetch_spot_meta() -> Result<SpotMeta> {
 /// List all available spot pairs as (human_name, @index) tuples.
 pub async fn list_spot_pairs() -> Result<Vec<(String, String)>> {
     let meta = fetch_spot_meta().await?;
-    let token_names: HashMap<u32, &str> = meta.tokens.iter().map(|t| (t.index, t.name.as_str())).collect();
+    let token_names: HashMap<u32, &str> = meta
+        .tokens
+        .iter()
+        .map(|t| (t.index, t.name.as_str()))
+        .collect();
 
     let mut pairs = Vec::new();
     for sp in &meta.universe {

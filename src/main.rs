@@ -13,7 +13,10 @@ use std::path::Path;
 const DATA_DIR: &str = "data";
 
 #[derive(Parser)]
-#[command(name = "hl-candles", about = "Build candle data from Hyperliquid S3 fills")]
+#[command(
+    name = "hl-candles",
+    about = "Build candle data from Hyperliquid S3 fills"
+)]
 struct Cli {
     /// Enable tracing instrumentation for performance profiling
     #[arg(long, global = true)]
@@ -80,7 +83,8 @@ fn write_candles(path: &Path, candles: &[candle::Candle]) -> Result<()> {
     writeln!(f, "open_time,close_time,open,high,low,close,volume,trades")?;
     for c in candles {
         writeln!(
-            f, "{},{},{},{},{},{},{},{}",
+            f,
+            "{},{},{},{},{},{},{},{}",
             c.open_time, c.close_time, c.open, c.high, c.low, c.close, c.volume, c.trades
         )?;
     }
@@ -100,15 +104,22 @@ async fn main() -> Result<()> {
     }
 
     match cli.command {
-        Command::Fetch { start, end } => {
-            cmd_fetch(start, end).await
-        }
-        Command::Build { coin, market, start, end, interval } => {
-            cmd_build(coin, market, start, end, interval).await
-        }
-        Command::Consolidate { coin, market, start, end, from, to } => {
-            cmd_consolidate(coin, market, start, end, from, to)
-        }
+        Command::Fetch { start, end } => cmd_fetch(start, end).await,
+        Command::Build {
+            coin,
+            market,
+            start,
+            end,
+            interval,
+        } => cmd_build(coin, market, start, end, interval).await,
+        Command::Consolidate {
+            coin,
+            market,
+            start,
+            end,
+            from,
+            to,
+        } => cmd_consolidate(coin, market, start, end, from, to),
     }
 }
 
@@ -118,7 +129,9 @@ async fn cmd_fetch(start: String, end: Option<String>) -> Result<()> {
         Some(e) => NaiveDate::parse_from_str(e, "%Y%m%d")?,
         None => start,
     };
-    if end < start { bail!("end date must be >= start date"); }
+    if end < start {
+        bail!("end date must be >= start date");
+    }
 
     let data_dir = Path::new(DATA_DIR);
     let client = fetcher::create_client().await;
@@ -149,7 +162,9 @@ async fn cmd_fetch(start: String, end: Option<String>) -> Result<()> {
                     Err(_) => continue,
                 }
             }
-            if !found { failed += 1; }
+            if !found {
+                failed += 1;
+            }
         }
 
         date += chrono::Duration::days(1);
@@ -160,7 +175,11 @@ async fn cmd_fetch(start: String, end: Option<String>) -> Result<()> {
 }
 
 async fn cmd_build(
-    coin_arg: String, market: Market, start: String, end: Option<String>, interval: String,
+    coin_arg: String,
+    market: Market,
+    start: String,
+    end: Option<String>,
+    interval: String,
 ) -> Result<()> {
     let interval_ms = candle::parse_interval(&interval)
         .ok_or_else(|| anyhow::anyhow!("invalid interval: {interval}"))?;
@@ -170,7 +189,9 @@ async fn cmd_build(
         Some(e) => NaiveDate::parse_from_str(e, "%Y%m%d")?,
         None => start,
     };
-    if end < start { bail!("end date must be >= start date"); }
+    if end < start {
+        bail!("end date must be >= start date");
+    }
 
     let (coin, coin_label) = match market {
         Market::Perp => {
@@ -186,7 +207,10 @@ async fn cmd_build(
         }
     };
 
-    let market_str = match market { Market::Perp => "perp", Market::Spot => "spot" };
+    let market_str = match market {
+        Market::Perp => "perp",
+        Market::Spot => "spot",
+    };
     let data_dir = Path::new(DATA_DIR);
     let client = fetcher::create_client().await;
 
@@ -213,7 +237,10 @@ async fn cmd_build(
                     cached += 1;
                     break;
                 }
-                if fetcher::fetch_hourly(&client, data_dir, &date_str, hour, source).await.is_ok() {
+                if fetcher::fetch_hourly(&client, data_dir, &date_str, hour, source)
+                    .await
+                    .is_ok()
+                {
                     fetched += 1;
                     break;
                 }
@@ -224,18 +251,23 @@ async fn cmd_build(
         let hours: Vec<u8> = (0..24).collect();
         let coin_ref = &coin;
         let sources_ref = &sources;
-        let hour_results: Vec<_> = hours.par_iter().filter_map(|&hour| {
-            for &source in sources_ref {
-                if let Some(path) = hl_candles::cache::get_cached(data_dir, &date_str, hour, source) {
-                    if let Ok(raw) = std::fs::read(&path) {
-                        if let Ok(trades) = parser::parse_fills(&raw, coin_ref, source) {
-                            return Some(trades);
+        let hour_results: Vec<_> = hours
+            .par_iter()
+            .filter_map(|&hour| {
+                for &source in sources_ref {
+                    if let Some(path) =
+                        hl_candles::cache::get_cached(data_dir, &date_str, hour, source)
+                    {
+                        if let Ok(raw) = std::fs::read(&path) {
+                            if let Ok(trades) = parser::parse_fills(&raw, coin_ref, source) {
+                                return Some(trades);
+                            }
                         }
                     }
                 }
-            }
-            None
-        }).collect();
+                None
+            })
+            .collect();
 
         let mut day_trades: Vec<_> = hour_results.into_iter().flatten().collect();
 
@@ -244,7 +276,9 @@ async fn cmd_build(
         let next_date_str = next_date.format("%Y%m%d").to_string();
         let next_sources = DataSource::for_date(&next_date_str);
         for &source in &next_sources {
-            if let Ok(raw) = fetcher::fetch_hourly(&client, data_dir, &next_date_str, 0, source).await {
+            if let Ok(raw) =
+                fetcher::fetch_hourly(&client, data_dir, &next_date_str, 0, source).await
+            {
                 let spillover = parser::parse_fills(&raw, &coin, source)?;
                 let count = spillover.iter().filter(|t| t.time_ms < day_end).count();
                 if count > 0 {
@@ -260,8 +294,11 @@ async fn cmd_build(
         let candles = candle::aggregate(&day_trades, interval_ms);
         if !candles.is_empty() {
             let out_path = data_dir
-                .join("candles").join(market_str).join(&coin_label)
-                .join(&interval).join(format!("{date_str}.csv"));
+                .join("candles")
+                .join(market_str)
+                .join(&coin_label)
+                .join(&interval)
+                .join(format!("{date_str}.csv"));
             write_candles(&out_path, &candles)?;
             let elapsed = t0.elapsed();
             println!("[{day_num}/{total_days}] {date_str} {} candles, {} trades ({:.1}s, total {:.1}s, {fetched} fetched/{cached} cached)", candles.len(), day_trades.len(), elapsed.as_secs_f64(), total_t0.elapsed().as_secs_f64());
@@ -277,33 +314,49 @@ async fn cmd_build(
 }
 
 fn cmd_consolidate(
-    coin_arg: String, market: Market, start: String, end: Option<String>,
-    from: String, to: String,
+    coin_arg: String,
+    market: Market,
+    start: String,
+    end: Option<String>,
+    from: String,
+    to: String,
 ) -> Result<()> {
     let from_ms = candle::parse_interval(&from)
         .ok_or_else(|| anyhow::anyhow!("invalid source interval: {from}"))?;
     let to_ms = candle::parse_interval(&to)
         .ok_or_else(|| anyhow::anyhow!("invalid target interval: {to}"))?;
-    if to_ms <= from_ms { bail!("target interval must be larger than source"); }
-    if to_ms % from_ms != 0 { bail!("target interval must be an even multiple of source"); }
+    if to_ms <= from_ms {
+        bail!("target interval must be larger than source");
+    }
+    if to_ms % from_ms != 0 {
+        bail!("target interval must be an even multiple of source");
+    }
 
     let start = NaiveDate::parse_from_str(&start, "%Y%m%d")?;
     let end = match &end {
         Some(e) => NaiveDate::parse_from_str(e, "%Y%m%d")?,
         None => start,
     };
-    if end < start { bail!("end date must be >= start date"); }
+    if end < start {
+        bail!("end date must be >= start date");
+    }
 
     let coin_label = coin_arg.to_uppercase();
-    let market_str = match market { Market::Perp => "perp", Market::Spot => "spot" };
+    let market_str = match market {
+        Market::Perp => "perp",
+        Market::Spot => "spot",
+    };
     let data_dir = Path::new(DATA_DIR);
 
     let mut date = start;
     while date <= end {
         let date_str = date.format("%Y%m%d").to_string();
         let src_path = data_dir
-            .join("candles").join(market_str).join(&coin_label)
-            .join(&from).join(format!("{date_str}.csv"));
+            .join("candles")
+            .join(market_str)
+            .join(&coin_label)
+            .join(&from)
+            .join(format!("{date_str}.csv"));
 
         if !src_path.exists() {
             println!("  {date_str}: no source file at {}", src_path.display());
@@ -316,10 +369,18 @@ fn cmd_consolidate(
 
         if !consolidated.is_empty() {
             let out_path = data_dir
-                .join("consolidated").join(market_str).join(&coin_label)
-                .join(&to).join(format!("{date_str}.csv"));
+                .join("consolidated")
+                .join(market_str)
+                .join(&coin_label)
+                .join(&to)
+                .join(format!("{date_str}.csv"));
             write_candles(&out_path, &consolidated)?;
-            println!("  {date_str}: {} -> {} candles ({})", source_candles.len(), consolidated.len(), out_path.display());
+            println!(
+                "  {date_str}: {} -> {} candles ({})",
+                source_candles.len(),
+                consolidated.len(),
+                out_path.display()
+            );
         }
 
         date += chrono::Duration::days(1);

@@ -7,7 +7,8 @@ const FIXTURE_DIR: &str = "tests/fixtures";
 
 fn load_fixture() -> Vec<u8> {
     let path = Path::new(FIXTURE_DIR).join("20250801/0.lz4");
-    std::fs::read(&path).unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", path.display()))
+    std::fs::read(&path)
+        .unwrap_or_else(|e| panic!("failed to read fixture {}: {e}", path.display()))
 }
 
 #[test]
@@ -16,7 +17,11 @@ fn parse_perp_fills() {
     let trades = parser::parse_fills(&data, "BTC", DataSource::FillsByBlock).unwrap();
     assert!(!trades.is_empty(), "should have perp trades");
     for t in &trades {
-        assert!(t.price > dec!(100_000) && t.price < dec!(200_000), "price {}", t.price);
+        assert!(
+            t.price > dec!(100_000) && t.price < dec!(200_000),
+            "price {}",
+            t.price
+        );
         assert!(t.size > Decimal::ZERO);
         assert!(t.time_ms > 0);
     }
@@ -28,7 +33,11 @@ fn parse_spot_fills() {
     let trades = parser::parse_fills(&data, "@142", DataSource::FillsByBlock).unwrap();
     assert!(!trades.is_empty(), "should have spot trades");
     for t in &trades {
-        assert!(t.price > dec!(100_000) && t.price < dec!(200_000), "price {}", t.price);
+        assert!(
+            t.price > dec!(100_000) && t.price < dec!(200_000),
+            "price {}",
+            t.price
+        );
         assert!(t.size > Decimal::ZERO);
     }
 }
