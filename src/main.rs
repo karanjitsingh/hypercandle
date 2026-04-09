@@ -2,6 +2,7 @@ use anyhow::{bail, Result};
 use chrono::NaiveDate;
 use clap::{Parser, Subcommand};
 use hl_candles::{candle, fetcher, parser, spot, DataSource, Market};
+use rayon::prelude::*;
 use std::io::Write;
 use std::path::Path;
 
@@ -186,23 +187,36 @@ async fn cmd_build(
         let day_start = day_start_ms(date);
         let day_end = day_start + 86_400_000;
 
-        let mut day_trades = Vec::new();
+        // Ensure all hours are cached (sequential S3 fetches if needed)
         for hour in 0..24u8 {
-            let mut found = false;
             for &source in &sources {
-                match fetcher::fetch_hourly(&client, data_dir, &date_str, hour, source).await {
-                    Ok(raw) => {
-                        let trades = parser::parse_fills(&raw, &coin, source)?;
-                        eprintln!("  {date_str}/{hour}: {} trades ({:?})", trades.len(), source);
-                        day_trades.extend(trades);
-                        found = true;
-                        break;
-                    }
-                    Err(_) => continue,
+                if hl_candles::cache::get_cached(data_dir, &date_str, hour, source).is_some() {
+                    break;
+                }
+                if fetcher::fetch_hourly(&client, data_dir, &date_str, hour, source).await.is_ok() {
+                    break;
                 }
             }
-            if !found { eprintln!("  {date_str}/{hour}: no data in any source"); }
         }
+
+        // Parallel decompress + parse all 24 hours using rayon
+        let hours: Vec<u8> = (0..24).collect();
+        let coin_ref = &coin;
+        let sources_ref = &sources;
+        let hour_results: Vec<_> = hours.par_iter().filter_map(|&hour| {
+            for &source in sources_ref {
+                if let Some(path) = hl_candles::cache::get_cached(data_dir, &date_str, hour, source) {
+                    if let Ok(raw) = std::fs::read(&path) {
+                        if let Ok(trades) = parser::parse_fills(&raw, coin_ref, source) {
+                            return Some(trades);
+                        }
+                    }
+                }
+            }
+            None
+        }).collect();
+
+        let mut day_trades: Vec<_> = hour_results.into_iter().flatten().collect();
 
         // Peek at next day's hour 0 for spillover trades
         let next_date = date + chrono::Duration::days(1);

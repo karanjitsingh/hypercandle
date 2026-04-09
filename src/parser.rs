@@ -75,11 +75,19 @@ fn decompress(lz4_data: &[u8]) -> Result<String> {
     String::from_utf8(buf).context("invalid UTF-8")
 }
 
+/// Pre-filter: build a string pattern to quickly skip lines that can't
+/// contain the target coin. Avoids deserializing ~88% of JSON for BTC.
+fn coin_filter(coin: &str) -> String {
+    format!("\"{}\"", coin)
+}
+
 /// Parse FillsByBlock format: each line is `{"events": [[addr, fill], ...]}`.
 fn parse_fills_by_block(text: &str, coin: &str) -> Result<Vec<Trade>> {
+    let filter = coin_filter(coin);
     let mut trades = Vec::new();
     let mut seen = HashSet::new();
     for line in text.lines().filter(|l| !l.is_empty()) {
+        if !line.contains(&filter) { continue; }
         let block: Block = serde_json::from_str(line).context("parsing block JSON")?;
         for (_addr, fill) in &block.events {
             if let Some(t) = extract_fill(fill, coin, &mut seen)? {
@@ -92,9 +100,11 @@ fn parse_fills_by_block(text: &str, coin: &str) -> Result<Vec<Trade>> {
 
 /// Parse NodeFills format: each line is `[address, fill]`.
 fn parse_node_fills(text: &str, coin: &str) -> Result<Vec<Trade>> {
+    let filter = coin_filter(coin);
     let mut trades = Vec::new();
     let mut seen = HashSet::new();
     for line in text.lines().filter(|l| !l.is_empty()) {
+        if !line.contains(&filter) { continue; }
         let (_addr, fill): (String, Fill) =
             serde_json::from_str(line).context("parsing node_fill JSON")?;
         if let Some(t) = extract_fill(&fill, coin, &mut seen)? {
