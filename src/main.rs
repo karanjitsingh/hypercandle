@@ -1,12 +1,22 @@
 use anyhow::{bail, Result};
 use chrono::NaiveDate;
 use clap::Parser;
-use hl_candles::{candle, fetcher, parser, DataSource, Market};
+use hl_candles::{candle, fetcher, parser, spot, DataSource, Market};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "hl-candles", about = "Build BTC candle data from Hyperliquid S3 fills")]
+#[command(name = "hl-candles", about = "Build candle data from Hyperliquid S3 fills")]
 struct Cli {
+    /// Coin symbol (e.g. BTC, ETH, SOL, HYPE, DOGE)
+    #[arg(long)]
+    coin: String,
+
+    /// Market type: perp or spot
+    /// For perp, --coin is used directly (e.g. BTC, ETH).
+    /// For spot, --coin should be a pair like BTCUSDC, ETHUSDC.
+    #[arg(long, value_enum, default_value = "perp")]
+    market: Market,
+
     /// Start date (YYYYMMDD)
     #[arg(long)]
     start: String,
@@ -18,10 +28,6 @@ struct Cli {
     /// Candle interval: 1m, 5m, 15m, 1h, 4h, 1d
     #[arg(long, default_value = "1h")]
     interval: String,
-
-    /// Market type
-    #[arg(long, value_enum, default_value = "perp")]
-    market: Market,
 
     /// Cache directory for downloaded S3 objects
     #[arg(long, default_value = "cache")]
@@ -48,8 +54,21 @@ async fn main() -> Result<()> {
         bail!("end date must be >= start date");
     }
 
+    // Resolve the coin identifier
+    let coin = match cli.market {
+        Market::Perp => {
+            let c = cli.coin.to_uppercase();
+            eprintln!("market: perp, coin: {c}");
+            c
+        }
+        Market::Spot => {
+            let resolved = spot::resolve_spot_coin(&cli.coin).await?;
+            eprintln!("market: spot, pair: {} -> {resolved}", cli.coin.to_uppercase());
+            resolved
+        }
+    };
+
     let client = fetcher::create_client().await;
-    let coin = cli.market.coin();
     let mut all_trades = Vec::new();
 
     let mut date = start;
@@ -62,7 +81,7 @@ async fn main() -> Result<()> {
         for hour in 0..24u8 {
             match fetcher::fetch_hourly(&client, &cli.cache_dir, &date_str, hour, source).await {
                 Ok(data) => {
-                    let trades = parser::parse_fills(&data, coin, source)?;
+                    let trades = parser::parse_fills(&data, &coin, source)?;
                     eprintln!("  {date_str}/{hour}: {} trades", trades.len());
                     all_trades.extend(trades);
                 }

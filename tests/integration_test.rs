@@ -1,4 +1,4 @@
-use hl_candles::{candle, parser, DataSource, Market};
+use hl_candles::{candle, parser, DataSource};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use std::path::Path;
@@ -13,7 +13,7 @@ fn load_fixture() -> Vec<u8> {
 #[test]
 fn parse_perp_fills() {
     let data = load_fixture();
-    let trades = parser::parse_fills(&data, Market::Perp.coin(), DataSource::FillsByBlock).unwrap();
+    let trades = parser::parse_fills(&data, "BTC", DataSource::FillsByBlock).unwrap();
     assert!(!trades.is_empty(), "should have perp trades");
     for t in &trades {
         assert!(t.price > dec!(100_000) && t.price < dec!(200_000), "price {}", t.price);
@@ -25,7 +25,7 @@ fn parse_perp_fills() {
 #[test]
 fn parse_spot_fills() {
     let data = load_fixture();
-    let trades = parser::parse_fills(&data, Market::Spot.coin(), DataSource::FillsByBlock).unwrap();
+    let trades = parser::parse_fills(&data, "@142", DataSource::FillsByBlock).unwrap();
     assert!(!trades.is_empty(), "should have spot trades");
     for t in &trades {
         assert!(t.price > dec!(100_000) && t.price < dec!(200_000), "price {}", t.price);
@@ -36,15 +36,15 @@ fn parse_spot_fills() {
 #[test]
 fn trades_are_deduplicated() {
     let data = load_fixture();
-    let trades = parser::parse_fills(&data, Market::Perp.coin(), DataSource::FillsByBlock).unwrap();
-    let trades2 = parser::parse_fills(&data, Market::Perp.coin(), DataSource::FillsByBlock).unwrap();
+    let trades = parser::parse_fills(&data, "BTC", DataSource::FillsByBlock).unwrap();
+    let trades2 = parser::parse_fills(&data, "BTC", DataSource::FillsByBlock).unwrap();
     assert_eq!(trades.len(), trades2.len(), "deterministic parsing");
 }
 
 #[test]
 fn trades_sorted_by_time() {
     let data = load_fixture();
-    let trades = parser::parse_fills(&data, Market::Perp.coin(), DataSource::FillsByBlock).unwrap();
+    let trades = parser::parse_fills(&data, "BTC", DataSource::FillsByBlock).unwrap();
     for w in trades.windows(2) {
         assert!(w[0].time_ms <= w[1].time_ms, "trades not sorted");
     }
@@ -53,7 +53,7 @@ fn trades_sorted_by_time() {
 #[test]
 fn aggregate_1m_candles() {
     let data = load_fixture();
-    let trades = parser::parse_fills(&data, Market::Perp.coin(), DataSource::FillsByBlock).unwrap();
+    let trades = parser::parse_fills(&data, "BTC", DataSource::FillsByBlock).unwrap();
     let candles = candle::aggregate(&trades, candle::parse_interval("1m").unwrap());
     assert!(!candles.is_empty());
     for c in &candles {
@@ -72,7 +72,7 @@ fn aggregate_1m_candles() {
 #[test]
 fn aggregate_1h_candles() {
     let data = load_fixture();
-    let trades = parser::parse_fills(&data, Market::Perp.coin(), DataSource::FillsByBlock).unwrap();
+    let trades = parser::parse_fills(&data, "BTC", DataSource::FillsByBlock).unwrap();
     let candles = candle::aggregate(&trades, candle::parse_interval("1h").unwrap());
     assert!(!candles.is_empty() && candles.len() <= 2);
     for c in &candles {
@@ -106,8 +106,8 @@ fn parse_interval_invalid() {
 #[test]
 fn perp_and_spot_are_different() {
     let data = load_fixture();
-    let perp = parser::parse_fills(&data, Market::Perp.coin(), DataSource::FillsByBlock).unwrap();
-    let spot = parser::parse_fills(&data, Market::Spot.coin(), DataSource::FillsByBlock).unwrap();
+    let perp = parser::parse_fills(&data, "BTC", DataSource::FillsByBlock).unwrap();
+    let spot = parser::parse_fills(&data, "@142", DataSource::FillsByBlock).unwrap();
     assert_ne!(perp.len(), spot.len(), "perp and spot should differ");
 }
 
