@@ -192,6 +192,7 @@ async fn cmd_build(
 
     let total_days = (end - start).num_days() + 1;
     let mut day_num = 0i64;
+    let total_t0 = std::time::Instant::now();
 
     let mut date = start;
     while date <= end {
@@ -271,6 +272,7 @@ async fn cmd_build(
 
         date += chrono::Duration::days(1);
     }
+    println!("done in {:.1}s", total_t0.elapsed().as_secs_f64());
     Ok(())
 }
 
