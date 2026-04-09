@@ -1,4 +1,4 @@
-# hyperliquid-ohlcv — Chat Summary
+# hypercandle — Chat Summary
 
 > Context for future AI agents working on this codebase.
 > Generated: 2026-04-09

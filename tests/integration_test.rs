@@ -1,4 +1,4 @@
-use hl_candles::{candle, parser, DataSource};
+use hypercandle::{candle, parser, DataSource};
 use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 use std::path::Path;
@@ -125,13 +125,13 @@ fn cache_roundtrip() {
     let dir = tempfile::tempdir().unwrap();
     let data = b"test data";
     let source = DataSource::FillsByBlock;
-    let path = hl_candles::cache::write_cache(dir.path(), "20250801", 0, source, data).unwrap();
+    let path = hypercandle::cache::write_cache(dir.path(), "20250801", 0, source, data).unwrap();
     assert!(path.exists());
     assert_eq!(std::fs::read(&path).unwrap(), data);
 
-    let cached = hl_candles::cache::get_cached(dir.path(), "20250801", 0, source);
+    let cached = hypercandle::cache::get_cached(dir.path(), "20250801", 0, source);
     assert!(cached.is_some());
     assert_eq!(cached.unwrap(), path);
 
-    assert!(hl_candles::cache::get_cached(dir.path(), "20250801", 1, source).is_none());
+    assert!(hypercandle::cache::get_cached(dir.path(), "20250801", 1, source).is_none());
 }

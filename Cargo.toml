@@ -1,5 +1,5 @@
 [package]
-name = "hyperliquid-ohlcv"
+name = "hypercandle"
 version = "0.1.0"
 edition = "2021"
 description = "Build OHLCV candle data from Hyperliquid's historical S3 fills"
@@ -7,7 +7,7 @@ authors = ["kjsingh"]
 license = "MIT"
 
 [lib]
-name = "hl_candles"
+name = "hypercandle"
 path = "src/lib.rs"
 
 [[bin]]

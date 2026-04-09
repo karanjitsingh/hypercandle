@@ -1,4 +1,4 @@
-# hyperliquid-ohlcv
+# hypercandle
 
 Rust CLI tool and library to build candle (OHLCV) data from [Hyperliquid's](https://hyperliquid.xyz) historical S3 fills data.
 
@@ -163,7 +163,7 @@ Note: On Hyperliquid, wrapped spot tokens use a `U` prefix (UBTC, UETH, USOL). T
 ## Library usage
 
 ```rust
-use hl_candles::{fetcher, parser, candle, DataSource};
+use hypercandle::{fetcher, parser, candle, DataSource};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {

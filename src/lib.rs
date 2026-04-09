@@ -1,4 +1,4 @@
-//! hl-candles: Build OHLCV candle data from Hyperliquid's historical S3 fills.
+//! hypercandle: Build OHLCV candle data from Hyperliquid's historical S3 fills.
 //!
 //! Hyperliquid publishes trade fills to `s3://hl-mainnet-node-data` in three
 //! formats across different date ranges. This library handles all three and

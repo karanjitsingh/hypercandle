@@ -1412,7 +1412,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "hyperliquid-ohlcv"
+name = "hypercandle"
 version = "0.1.0"
 dependencies = [
  "anyhow",

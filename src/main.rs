@@ -1,7 +1,7 @@
 use anyhow::{bail, Result};
 use chrono::NaiveDate;
 use clap::{Parser, Subcommand};
-use hl_candles::{candle, fetcher, parser, spot, DataSource, Market};
+use hypercandle::{candle, fetcher, parser, spot, DataSource, Market};
 use rayon::prelude::*;
 use std::io::Write;
 use std::path::Path;
@@ -147,7 +147,7 @@ async fn cmd_fetch(start: String, end: Option<String>) -> Result<()> {
         for hour in 0..24u8 {
             let mut found = false;
             for &source in &sources {
-                if hl_candles::cache::get_cached(data_dir, &date_str, hour, source).is_some() {
+                if hypercandle::cache::get_cached(data_dir, &date_str, hour, source).is_some() {
                     cached += 1;
                     found = true;
                     break;
@@ -233,7 +233,7 @@ async fn cmd_build(
         let mut cached = 0u8;
         for hour in 0..24u8 {
             for &source in &sources {
-                if hl_candles::cache::get_cached(data_dir, &date_str, hour, source).is_some() {
+                if hypercandle::cache::get_cached(data_dir, &date_str, hour, source).is_some() {
                     cached += 1;
                     break;
                 }
@@ -256,7 +256,7 @@ async fn cmd_build(
             .filter_map(|&hour| {
                 for &source in sources_ref {
                     if let Some(path) =
-                        hl_candles::cache::get_cached(data_dir, &date_str, hour, source)
+                        hypercandle::cache::get_cached(data_dir, &date_str, hour, source)
                     {
                         if let Ok(raw) = std::fs::read(&path) {
                             if let Ok(trades) = parser::parse_fills(&raw, coin_ref, source) {
