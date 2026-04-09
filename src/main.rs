@@ -24,7 +24,7 @@ struct Cli {
     market: Market,
 
     /// Cache directory for downloaded S3 objects
-    #[arg(long, default_value = ".cache")]
+    #[arg(long, default_value = "cache")]
     cache_dir: PathBuf,
 
     /// Output format: json or csv

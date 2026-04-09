@@ -41,7 +41,7 @@ hl-candles --start 20250801 --end 20250831 --interval 1d --cache-dir /tmp/hl-cac
 | `--end` | same as start | End date inclusive (`YYYYMMDD`) |
 | `--interval` | `1h` | Candle interval: `1m`, `5m`, `15m`, `1h`, `4h`, `1d` |
 | `--market` | `perp` | `perp` (BTC-PERP) or `spot` (BTC/USDC spot, coin `@142`) |
-| `--cache-dir` | `.cache` | Local cache directory for downloaded S3 objects |
+| `--cache-dir` | `cache` | Local cache directory for downloaded S3 objects |
 | `--format` | `json` | Output format: `json` or `csv` |
 
 ### Output
@@ -76,7 +76,7 @@ use hl_candles::{fetcher, parser, candle, Market};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let client = fetcher::create_client().await;
-    let cache_dir = std::path::Path::new(".cache");
+    let cache_dir = std::path::Path::new("cache");
 
     let data = fetcher::fetch_hourly(&client, cache_dir, "20250801", 0).await?;
     let trades = parser::parse_fills(&data, Market::Perp.coin())?;
