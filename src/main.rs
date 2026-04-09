@@ -204,12 +204,16 @@ async fn cmd_build(
         let day_end = day_start + 86_400_000;
 
         // Ensure all hours are cached (sequential S3 fetches if needed)
+        let mut fetched = 0u8;
+        let mut cached = 0u8;
         for hour in 0..24u8 {
             for &source in &sources {
                 if hl_candles::cache::get_cached(data_dir, &date_str, hour, source).is_some() {
+                    cached += 1;
                     break;
                 }
                 if fetcher::fetch_hourly(&client, data_dir, &date_str, hour, source).await.is_ok() {
+                    fetched += 1;
                     break;
                 }
             }
@@ -259,10 +263,10 @@ async fn cmd_build(
                 .join(&interval).join(format!("{date_str}.csv"));
             write_candles(&out_path, &candles)?;
             let elapsed = t0.elapsed();
-            println!("[{day_num}/{total_days}] {date_str} {} candles, {} trades ({:.1}s)", candles.len(), day_trades.len(), elapsed.as_secs_f64());
+            println!("[{day_num}/{total_days}] {date_str} {} candles, {} trades ({:.1}s, {fetched} fetched/{cached} cached)", candles.len(), day_trades.len(), elapsed.as_secs_f64());
         } else {
             let elapsed = t0.elapsed();
-            println!("[{day_num}/{total_days}] {date_str} no trades ({:.1}s)", elapsed.as_secs_f64());
+            println!("[{day_num}/{total_days}] {date_str} no trades ({:.1}s, {fetched} fetched/{cached} cached)", elapsed.as_secs_f64());
         }
 
         date += chrono::Duration::days(1);
