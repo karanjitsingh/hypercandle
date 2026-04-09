@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
+use rust_decimal::Decimal;
 use serde::Deserialize;
 use std::collections::HashSet;
+use std::str::FromStr;
 
 use crate::DataSource;
 
@@ -35,8 +37,8 @@ struct NodeTrade {
 /// A simplified trade extracted from a fill, filtered to the target coin.
 #[derive(Debug, Clone)]
 pub struct Trade {
-    pub price: f64,
-    pub size: f64,
+    pub price: Decimal,
+    pub size: Decimal,
     pub time_ms: u64,
     pub is_buy: bool,
 }
@@ -99,9 +101,9 @@ fn extract_fill(fill: &Fill, coin: &str, seen: &mut HashSet<u64>) -> Result<Opti
     if fill.tid == 0 || !seen.insert(fill.tid) {
         return Ok(None);
     }
-    let price: f64 = fill.px.parse().context("parsing price")?;
-    let size: f64 = fill.sz.parse().context("parsing size")?;
-    if size == 0.0 {
+    let price = Decimal::from_str(&fill.px).context("parsing price")?;
+    let size = Decimal::from_str(&fill.sz).context("parsing size")?;
+    if size.is_zero() {
         return Ok(None);
     }
     Ok(Some(Trade {
@@ -122,9 +124,9 @@ fn parse_node_trades(text: &str, coin: &str) -> Result<Vec<Trade>> {
         if nt.coin != coin || !seen.insert(nt.hash.clone()) {
             continue;
         }
-        let price: f64 = nt.px.parse().context("parsing price")?;
-        let size: f64 = nt.sz.parse().context("parsing size")?;
-        if size == 0.0 {
+        let price = Decimal::from_str(&nt.px).context("parsing price")?;
+        let size = Decimal::from_str(&nt.sz).context("parsing size")?;
+        if size.is_zero() {
             continue;
         }
         let time_ms = parse_iso_to_epoch_ms(&nt.time)?;

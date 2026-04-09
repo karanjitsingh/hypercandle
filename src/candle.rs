@@ -1,19 +1,16 @@
 use crate::parser::Trade;
+use rust_decimal::Decimal;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Candle {
-    /// Candle open time (epoch ms)
     pub open_time: u64,
-    /// Candle close time (epoch ms)
     pub close_time: u64,
-    pub open: f64,
-    pub high: f64,
-    pub low: f64,
-    pub close: f64,
-    /// Volume in base currency (BTC)
-    pub volume: f64,
-    /// Number of trades
+    pub open: Decimal,
+    pub high: Decimal,
+    pub low: Decimal,
+    pub close: Decimal,
+    pub volume: Decimal,
     pub trades: u64,
 }
 
@@ -32,8 +29,12 @@ pub fn aggregate(trades: &[Trade], interval_ms: u64) -> Vec<Candle> {
 
         match current.as_mut() {
             Some(c) if c.open_time == bucket_start => {
-                c.high = c.high.max(trade.price);
-                c.low = c.low.min(trade.price);
+                if trade.price > c.high {
+                    c.high = trade.price;
+                }
+                if trade.price < c.low {
+                    c.low = trade.price;
+                }
                 c.close = trade.price;
                 c.volume += trade.size;
                 c.trades += 1;

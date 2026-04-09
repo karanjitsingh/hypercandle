@@ -1,4 +1,6 @@
 use hl_candles::{candle, parser, DataSource, Market};
+use rust_decimal::Decimal;
+use rust_decimal_macros::dec;
 use std::path::Path;
 
 const FIXTURE_DIR: &str = "tests/fixtures";
@@ -13,10 +15,9 @@ fn parse_perp_fills() {
     let data = load_fixture();
     let trades = parser::parse_fills(&data, Market::Perp.coin(), DataSource::FillsByBlock).unwrap();
     assert!(!trades.is_empty(), "should have perp trades");
-    // All trades should have reasonable BTC prices
     for t in &trades {
-        assert!(t.price > 100_000.0 && t.price < 200_000.0, "price {}", t.price);
-        assert!(t.size > 0.0);
+        assert!(t.price > dec!(100_000) && t.price < dec!(200_000), "price {}", t.price);
+        assert!(t.size > Decimal::ZERO);
         assert!(t.time_ms > 0);
     }
 }
@@ -27,8 +28,8 @@ fn parse_spot_fills() {
     let trades = parser::parse_fills(&data, Market::Spot.coin(), DataSource::FillsByBlock).unwrap();
     assert!(!trades.is_empty(), "should have spot trades");
     for t in &trades {
-        assert!(t.price > 100_000.0 && t.price < 200_000.0, "price {}", t.price);
-        assert!(t.size > 0.0);
+        assert!(t.price > dec!(100_000) && t.price < dec!(200_000), "price {}", t.price);
+        assert!(t.size > Decimal::ZERO);
     }
 }
 
@@ -36,10 +37,6 @@ fn parse_spot_fills() {
 fn trades_are_deduplicated() {
     let data = load_fixture();
     let trades = parser::parse_fills(&data, Market::Perp.coin(), DataSource::FillsByBlock).unwrap();
-    // Each tid should appear only once
-    let mut tids: Vec<u64> = trades.iter().map(|t| t.time_ms).collect();
-    // Use tid-based check: count unique time+price combos shouldn't exceed trade count
-    // More directly: parse twice and ensure same count
     let trades2 = parser::parse_fills(&data, Market::Perp.coin(), DataSource::FillsByBlock).unwrap();
     assert_eq!(trades.len(), trades2.len(), "deterministic parsing");
 }
@@ -60,13 +57,13 @@ fn aggregate_1m_candles() {
     let candles = candle::aggregate(&trades, candle::parse_interval("1m").unwrap());
     assert!(!candles.is_empty());
     for c in &candles {
-        assert!(c.open > 0.0);
+        assert!(c.open > Decimal::ZERO);
         assert!(c.high >= c.low);
         assert!(c.high >= c.open);
         assert!(c.high >= c.close);
         assert!(c.low <= c.open);
         assert!(c.low <= c.close);
-        assert!(c.volume > 0.0);
+        assert!(c.volume > Decimal::ZERO);
         assert!(c.trades > 0);
         assert_eq!(c.close_time, c.open_time + 59_999);
     }
@@ -77,7 +74,6 @@ fn aggregate_1h_candles() {
     let data = load_fixture();
     let trades = parser::parse_fills(&data, Market::Perp.coin(), DataSource::FillsByBlock).unwrap();
     let candles = candle::aggregate(&trades, candle::parse_interval("1h").unwrap());
-    // Fixture may span an hour boundary, so 1-2 candles expected
     assert!(!candles.is_empty() && candles.len() <= 2);
     for c in &candles {
         assert!(c.trades > 0);
@@ -112,7 +108,6 @@ fn perp_and_spot_are_different() {
     let data = load_fixture();
     let perp = parser::parse_fills(&data, Market::Perp.coin(), DataSource::FillsByBlock).unwrap();
     let spot = parser::parse_fills(&data, Market::Spot.coin(), DataSource::FillsByBlock).unwrap();
-    // They should have different trade counts (different coins)
     assert_ne!(perp.len(), spot.len(), "perp and spot should differ");
 }
 
@@ -124,11 +119,9 @@ fn cache_roundtrip() {
     assert!(path.exists());
     assert_eq!(std::fs::read(&path).unwrap(), data);
 
-    // get_cached should find it
     let cached = hl_candles::cache::get_cached(dir.path(), "20250801", 0);
     assert!(cached.is_some());
     assert_eq!(cached.unwrap(), path);
 
-    // Missing entry returns None
     assert!(hl_candles::cache::get_cached(dir.path(), "20250801", 1).is_none());
 }
