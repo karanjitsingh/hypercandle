@@ -272,7 +272,7 @@ async fn cmd_build(
 
         date += chrono::Duration::days(1);
     }
-    println!("done in {:.1}s", total_t0.elapsed().as_secs_f64());
+    println!("done");
     Ok(())
 }
 
