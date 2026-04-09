@@ -13,6 +13,7 @@ use rust_decimal::Decimal;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::str::FromStr;
+use tracing::instrument;
 
 use crate::DataSource;
 
@@ -56,6 +57,7 @@ pub struct Trade {
 
 /// Decompress LZ4 data and parse trades for the given coin.
 /// Dispatches to the correct parser based on the data source.
+#[instrument(skip(lz4_data), fields(coin, source = ?source))]
 pub fn parse_fills(lz4_data: &[u8], coin: &str, source: DataSource) -> Result<Vec<Trade>> {
     let text = decompress(lz4_data)?;
     let mut trades = match source {
@@ -67,6 +69,7 @@ pub fn parse_fills(lz4_data: &[u8], coin: &str, source: DataSource) -> Result<Ve
     Ok(trades)
 }
 
+#[instrument(skip(lz4_data), fields(compressed_bytes = lz4_data.len()))]
 fn decompress(lz4_data: &[u8]) -> Result<String> {
     use std::io::Read;
     let mut decoder = lz4::Decoder::new(lz4_data).context("creating LZ4 decoder")?;

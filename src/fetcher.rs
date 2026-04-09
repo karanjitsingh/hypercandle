@@ -7,12 +7,14 @@
 use anyhow::{Context, Result};
 use aws_sdk_s3::Client;
 use std::path::Path;
+use tracing::instrument;
 
 use crate::cache;
 use crate::{DataSource, S3_BUCKET};
 
 /// Fetch an hourly fills file from S3, using local cache if available.
 /// Returns the raw LZ4-compressed bytes (not decompressed).
+#[instrument(skip(client, data_dir), fields(date, hour, source = ?source))]
 pub async fn fetch_hourly(
     client: &Client,
     data_dir: &Path,

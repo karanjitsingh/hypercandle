@@ -15,6 +15,10 @@ const DATA_DIR: &str = "data";
 #[derive(Parser)]
 #[command(name = "hl-candles", about = "Build candle data from Hyperliquid S3 fills")]
 struct Cli {
+    /// Enable tracing instrumentation for performance profiling
+    #[arg(long, global = true)]
+    benchmark: bool,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -86,6 +90,14 @@ fn write_candles(path: &Path, candles: &[candle::Candle]) -> Result<()> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    if cli.benchmark {
+        use tracing_subscriber::fmt::format::FmtSpan;
+        tracing_subscriber::fmt()
+            .with_span_events(FmtSpan::CLOSE)
+            .with_target(false)
+            .init();
+    }
 
     match cli.command {
         Command::Fetch { start, end } => {
