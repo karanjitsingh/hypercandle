@@ -1,3 +1,13 @@
+//! Parse LZ4-compressed NDJSON fills into trades.
+//!
+//! Supports three data formats (see [`DataSource`]):
+//! - **FillsByBlock**: blocks with `events` array of `[address, fill]` pairs
+//! - **NodeFills**: flat `[address, fill]` per line (same fill schema)
+//! - **NodeTrades**: trade objects with ISO timestamps, deduped by hash
+//!
+//! Fills appear twice in the data (once per counterparty). We deduplicate
+//! by `tid` (or `hash` for NodeTrades) to avoid double-counting volume.
+
 use anyhow::{Context, Result};
 use rust_decimal::Decimal;
 use serde::Deserialize;
@@ -6,35 +16,36 @@ use std::str::FromStr;
 
 use crate::DataSource;
 
-// -- node_fills_by_block format --
+// -- FillsByBlock format: each line is a block --
 #[derive(Debug, Deserialize)]
 struct Block {
     events: Vec<(String, Fill)>,
 }
 
-// -- node_fills / node_fills_by_block shared fill struct --
+// -- Fill schema shared by FillsByBlock and NodeFills --
 #[derive(Debug, Deserialize)]
 struct Fill {
     coin: String,
     px: String,
     sz: String,
     side: String,
-    time: u64,
-    tid: u64,
+    time: u64,  // epoch ms
+    tid: u64,   // trade ID, used for deduplication
 }
 
-// -- node_trades format --
+// -- NodeTrades format: different schema, ISO timestamps --
 #[derive(Debug, Deserialize)]
 struct NodeTrade {
     coin: String,
     px: String,
     sz: String,
     side: String,
-    time: String, // ISO 8601
-    hash: String,
+    time: String,  // ISO 8601 e.g. "2025-03-31T23:59:59.962208772"
+    hash: String,  // tx hash, used for deduplication (no tid in this format)
 }
 
-/// A simplified trade extracted from a fill, filtered to the target coin.
+/// A normalized trade extracted from any of the three formats.
+/// Uses `Decimal` for exact price/volume arithmetic.
 #[derive(Debug, Clone)]
 pub struct Trade {
     pub price: Decimal,
@@ -44,7 +55,7 @@ pub struct Trade {
 }
 
 /// Decompress LZ4 data and parse trades for the given coin.
-/// Auto-selects parser based on the data source.
+/// Dispatches to the correct parser based on the data source.
 pub fn parse_fills(lz4_data: &[u8], coin: &str, source: DataSource) -> Result<Vec<Trade>> {
     let text = decompress(lz4_data)?;
     let mut trades = match source {
@@ -64,7 +75,7 @@ fn decompress(lz4_data: &[u8]) -> Result<String> {
     String::from_utf8(buf).context("invalid UTF-8")
 }
 
-/// Current format: each line is a block with events array of [address, fill] pairs.
+/// Parse FillsByBlock format: each line is `{"events": [[addr, fill], ...]}`.
 fn parse_fills_by_block(text: &str, coin: &str) -> Result<Vec<Trade>> {
     let mut trades = Vec::new();
     let mut seen = HashSet::new();
@@ -79,7 +90,7 @@ fn parse_fills_by_block(text: &str, coin: &str) -> Result<Vec<Trade>> {
     Ok(trades)
 }
 
-/// Legacy format: each line is a flat [address, fill] pair.
+/// Parse NodeFills format: each line is `[address, fill]`.
 fn parse_node_fills(text: &str, coin: &str) -> Result<Vec<Trade>> {
     let mut trades = Vec::new();
     let mut seen = HashSet::new();
@@ -93,11 +104,12 @@ fn parse_node_fills(text: &str, coin: &str) -> Result<Vec<Trade>> {
     Ok(trades)
 }
 
-/// Shared fill extraction with tid dedup.
+/// Extract a Trade from a Fill, deduplicating by tid.
 fn extract_fill(fill: &Fill, coin: &str, seen: &mut HashSet<u64>) -> Result<Option<Trade>> {
     if fill.coin != coin {
         return Ok(None);
     }
+    // Each trade appears twice (once per counterparty). Skip duplicates.
     if fill.tid == 0 || !seen.insert(fill.tid) {
         return Ok(None);
     }
@@ -114,7 +126,7 @@ fn extract_fill(fill: &Fill, coin: &str, seen: &mut HashSet<u64>) -> Result<Opti
     }))
 }
 
-/// Legacy node_trades format: each line is a trade object with ISO timestamp.
+/// Parse NodeTrades format: each line is a trade object with ISO timestamp.
 /// Already one trade per line (not duplicated per side), dedup by hash.
 fn parse_node_trades(text: &str, coin: &str) -> Result<Vec<Trade>> {
     let mut trades = Vec::new();
@@ -140,8 +152,9 @@ fn parse_node_trades(text: &str, coin: &str) -> Result<Vec<Trade>> {
     Ok(trades)
 }
 
+/// Parse ISO 8601 timestamp to epoch milliseconds.
+/// Format: "2025-03-31T23:59:59.962208772"
 fn parse_iso_to_epoch_ms(s: &str) -> Result<u64> {
-    // Format: "2025-03-31T23:59:59.962208772"
     let dt = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f")
         .context("parsing ISO timestamp")?;
     Ok(dt.and_utc().timestamp_millis() as u64)

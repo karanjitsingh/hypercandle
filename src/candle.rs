@@ -1,20 +1,40 @@
+//! OHLCV candle aggregation.
+//!
+//! Trades (sorted by time) are bucketed into fixed-width time intervals.
+//! Each bucket produces one candle with open, high, low, close prices,
+//! total volume, and trade count. Uses `Decimal` for exact arithmetic.
+
 use crate::parser::Trade;
 use rust_decimal::Decimal;
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Candle {
+    /// Candle open time (epoch ms, inclusive)
     pub open_time: u64,
+    /// Candle close time (epoch ms, inclusive: open_time + interval - 1)
     pub close_time: u64,
+    /// First trade price in the interval
     pub open: Decimal,
+    /// Highest trade price in the interval
     pub high: Decimal,
+    /// Lowest trade price in the interval
     pub low: Decimal,
+    /// Last trade price in the interval
     pub close: Decimal,
+    /// Total volume in base currency
     pub volume: Decimal,
+    /// Number of trades
     pub trades: u64,
 }
 
-/// Aggregate trades into candles of the given interval (in milliseconds).
+/// Aggregate sorted trades into candles of the given interval (in milliseconds).
+///
+/// Trades must be sorted by `time_ms`. Each trade is assigned to a bucket:
+///   `bucket_start = (time_ms / interval_ms) * interval_ms`
+///
+/// Candles are emitted in chronological order. Empty intervals (no trades)
+/// produce no candle — gaps are expected.
 pub fn aggregate(trades: &[Trade], interval_ms: u64) -> Vec<Candle> {
     if trades.is_empty() {
         return Vec::new();
@@ -66,11 +86,10 @@ pub fn aggregate(trades: &[Trade], interval_ms: u64) -> Vec<Candle> {
 pub fn parse_interval(s: &str) -> Option<u64> {
     let (num, unit) = s.split_at(s.len() - 1);
     let n: u64 = num.parse().ok()?;
-    let ms = match unit {
-        "m" => n * 60_000,
-        "h" => n * 3_600_000,
-        "d" => n * 86_400_000,
-        _ => return None,
-    };
-    Some(ms)
+    match unit {
+        "m" => Some(n * 60_000),
+        "h" => Some(n * 3_600_000),
+        "d" => Some(n * 86_400_000),
+        _ => None,
+    }
 }

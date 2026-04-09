@@ -159,6 +159,29 @@ This tool uses fills from `hl-mainnet-node-data`. Below is a summary of all know
 | `explorer_blocks/` | Historical explorer blocks (L1 block data) | LZ4 |
 | `replica_cmds/` | Historical L1 transactions | LZ4 |
 
+### Source selection and boundary handling
+
+The tool auto-selects the correct data source based on date:
+
+| Date range | Source | Notes |
+|---|---|---|
+| 2025-03-22 → 2025-05-24 | `node_trades` | Oldest format, ISO timestamps, dedup by hash |
+| **2025-05-25** | `node_trades` + `node_fills` | **Transition day**: `node_trades` has hours 0-23, `node_fills` starts at hour 14 |
+| 2025-05-26 → 2025-07-26 | `node_fills` | Flat `[addr, fill]` per line, dedup by tid |
+| **2025-07-27** | `node_fills` + `node_fills_by_block` | **Transition day**: `node_fills` has hours 0-8, `node_fills_by_block` starts at hour 8 |
+| 2025-07-28 → present | `node_fills_by_block` | Current format, blocks with events array |
+
+On transition dates, both sources are tried per hour to ensure full 24-hour coverage.
+
+### Day-boundary spillover
+
+S3 files are partitioned by block production time, not trade timestamp. The hour-0 file for a given date may contain a few trades timestamped in the last seconds of the previous day. The tool handles this by:
+
+1. Peeking at the next day's hour-0 file to catch spillover trades
+2. Filtering all trades to the exact day boundary (00:00:00.000 → 23:59:59.999 UTC)
+
+This ensures each day produces exactly 24 hourly candles with no gaps or overlaps, regardless of whether days are processed together or separately.
+
 ### `s3://hyperliquid-archive` (requester-pays, updated ~monthly)
 
 | Prefix | Content | Format |
@@ -170,7 +193,6 @@ This tool uses fills from `hl-mainnet-node-data`. Below is a summary of all know
 
 - The archive bucket is updated infrequently (~monthly) with no guarantee of timeliness or completeness.
 - Hyperliquid does **not** provide historical candle data via S3 — you must build candles from fills yourself, which is what this tool does.
-- The `node_fills_by_block/hourly/` prefix is the current/recommended format. The tool auto-selects the right format based on date.
 - **Docs**: https://hyperliquid.gitbook.io/hyperliquid-docs/historical-data
 
 ## Tests

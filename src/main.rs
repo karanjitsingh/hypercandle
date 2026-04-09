@@ -5,16 +5,21 @@ use hl_candles::{candle, fetcher, parser, spot, DataSource, Market};
 use std::io::Write;
 use std::path::Path;
 
+/// All data lives under this directory:
+/// - `data/s3/...`      — cached raw S3 downloads (LZ4 compressed)
+/// - `data/candles/...`  — generated candle CSVs
 const DATA_DIR: &str = "data";
 
 #[derive(Parser)]
 #[command(name = "hl-candles", about = "Build candle data from Hyperliquid S3 fills")]
 struct Cli {
-    /// Coin symbol (e.g. BTC, ETH, SOL for perp; BTCUSDC, ETHUSDC for spot)
+    /// Coin symbol. For perp: BTC, ETH, SOL, etc.
+    /// For spot: pair name like BTCUSDC, ETHUSDC, HYPEUSDC.
     #[arg(long)]
     coin: String,
 
-    /// Market type
+    /// Market type. Perp uses coin name directly. Spot resolves the pair
+    /// name to an @index via the Hyperliquid spotMeta API.
     #[arg(long, value_enum, default_value = "perp")]
     market: Market,
 
@@ -31,7 +36,7 @@ struct Cli {
     interval: String,
 }
 
-/// Epoch ms for start of a UTC day.
+/// Epoch ms for 00:00:00.000 UTC of the given date.
 fn day_start_ms(date: NaiveDate) -> u64 {
     date.and_hms_opt(0, 0, 0)
         .unwrap()
@@ -55,6 +60,8 @@ async fn main() -> Result<()> {
         bail!("end date must be >= start date");
     }
 
+    // Resolve the coin identifier.
+    // Perp: use as-is (e.g. "BTC"). Spot: resolve pair name to @index.
     let (coin, coin_label) = match cli.market {
         Market::Perp => {
             let c = cli.coin.to_uppercase();
@@ -77,16 +84,22 @@ async fn main() -> Result<()> {
     let data_dir = Path::new(DATA_DIR);
     let client = fetcher::create_client().await;
 
+    // Process one day at a time. Each day produces one CSV file.
     let mut date = start;
     while date <= end {
         let date_str = date.format("%Y%m%d").to_string();
+
+        // Get the data source(s) for this date. On transition dates (20250525,
+        // 20250727) multiple sources are returned — we try each per hour and
+        // use the first that has data.
         let sources = DataSource::for_date(&date_str);
         eprintln!("source: {:?} for {date_str}", sources);
 
+        // Day boundaries in epoch ms for filtering trades.
         let day_start = day_start_ms(date);
         let day_end = day_start + 86_400_000; // exclusive
 
-        // Fetch all 24 hours for this day, trying each source
+        // Fetch all 24 hours, trying each source until one succeeds.
         let mut day_trades = Vec::new();
         for hour in 0..24u8 {
             let mut found = false;
@@ -107,7 +120,9 @@ async fn main() -> Result<()> {
             }
         }
 
-        // Peek at next day's hour 0 to catch spillover trades belonging to this day
+        // S3 files are partitioned by block production time, not trade timestamp.
+        // The hour-0 file for the next day may contain trades timestamped in the
+        // last seconds of the current day. Peek at it to avoid losing those trades.
         let next_date = date + chrono::Duration::days(1);
         let next_date_str = next_date.format("%Y%m%d").to_string();
         let next_sources = DataSource::for_date(&next_date_str);
@@ -123,12 +138,15 @@ async fn main() -> Result<()> {
             }
         }
 
-        // Filter to only trades within this day's time range
+        // Filter to exactly this day's time range [00:00:00.000, 23:59:59.999].
+        // This ensures each day produces exactly 24 hourly candles with no
+        // overlap between consecutive days, regardless of run order.
         day_trades.retain(|t| t.time_ms >= day_start && t.time_ms < day_end);
         day_trades.sort_by_key(|t| t.time_ms);
 
         let candles = candle::aggregate(&day_trades, interval_ms);
 
+        // Write candles to data/candles/{market}/{coin}/{interval}/{date}.csv
         if !candles.is_empty() {
             let out_dir = data_dir
                 .join("candles")
