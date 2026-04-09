@@ -29,7 +29,7 @@ pub async fn fetch_hourly(
 
     let prefix = source.s3_prefix();
     let key = format!("{prefix}/{date}/{hour}.lz4");
-    eprint!("↓");
+    
 
     let resp = client
         .get_object()

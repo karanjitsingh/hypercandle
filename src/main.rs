@@ -141,7 +141,7 @@ async fn cmd_fetch(start: String, end: Option<String>) -> Result<()> {
                 }
                 match fetcher::fetch_hourly(&client, data_dir, &date_str, hour, source).await {
                     Ok(data) => {
-                        eprintln!("  {date_str}/{hour}: {} bytes ({:?})", data.len(), source);
+                        println!("  {date_str}/{hour}: {} bytes ({:?})", data.len(), source);
                         downloaded += 1;
                         found = true;
                         break;
@@ -155,7 +155,7 @@ async fn cmd_fetch(start: String, end: Option<String>) -> Result<()> {
         date += chrono::Duration::days(1);
     }
 
-    eprintln!("\nfetch complete: {downloaded} downloaded, {cached} cached, {failed} failed");
+    println!("\nfetch complete: {downloaded} downloaded, {cached} cached, {failed} failed");
     Ok(())
 }
 
@@ -175,13 +175,13 @@ async fn cmd_build(
     let (coin, coin_label) = match market {
         Market::Perp => {
             let c = coin_arg.to_uppercase();
-            eprintln!("market: perp, coin: {c}");
+            println!("market: perp, coin: {c}");
             (c.clone(), c)
         }
         Market::Spot => {
             let label = coin_arg.to_uppercase();
             let resolved = spot::resolve_spot_coin(&coin_arg).await?;
-            eprintln!("market: spot, pair: {label} -> {resolved}");
+            println!("market: spot, pair: {label} -> {resolved}");
             (resolved, label)
         }
     };
@@ -258,9 +258,9 @@ async fn cmd_build(
                 .join("candles").join(market_str).join(&coin_label)
                 .join(&interval).join(format!("{date_str}.csv"));
             write_candles(&out_path, &candles)?;
-            eprintln!("{} candles, {} trades", candles.len(), day_trades.len());
+            println!("{} candles, {} trades", candles.len(), day_trades.len());
         } else {
-            eprintln!("no trades");
+            println!("no trades");
         }
 
         date += chrono::Duration::days(1);
@@ -298,7 +298,7 @@ fn cmd_consolidate(
             .join(&from).join(format!("{date_str}.csv"));
 
         if !src_path.exists() {
-            eprintln!("  {date_str}: no source file at {}", src_path.display());
+            println!("  {date_str}: no source file at {}", src_path.display());
             date += chrono::Duration::days(1);
             continue;
         }
@@ -311,7 +311,7 @@ fn cmd_consolidate(
                 .join("consolidated").join(market_str).join(&coin_label)
                 .join(&to).join(format!("{date_str}.csv"));
             write_candles(&out_path, &consolidated)?;
-            eprintln!("  {date_str}: {} -> {} candles ({})", source_candles.len(), consolidated.len(), out_path.display());
+            println!("  {date_str}: {} -> {} candles ({})", source_candles.len(), consolidated.len(), out_path.display());
         }
 
         date += chrono::Duration::days(1);
