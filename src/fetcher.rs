@@ -6,15 +6,14 @@ use crate::cache;
 use crate::{DataSource, S3_BUCKET};
 
 /// Fetch an hourly fills file from S3, using local cache if available.
-/// Returns the raw LZ4-compressed bytes.
 pub async fn fetch_hourly(
     client: &Client,
-    cache_dir: &Path,
+    data_dir: &Path,
     date: &str,
     hour: u8,
     source: DataSource,
 ) -> Result<Vec<u8>> {
-    if let Some(path) = cache::get_cached(cache_dir, date, hour) {
+    if let Some(path) = cache::get_cached(data_dir, date, hour, source) {
         eprintln!("cache hit: {date}/{hour}.lz4");
         return std::fs::read(&path).context("reading cached file");
     }
@@ -40,7 +39,7 @@ pub async fn fetch_hourly(
         .into_bytes()
         .to_vec();
 
-    cache::write_cache(cache_dir, date, hour, &data)?;
+    cache::write_cache(data_dir, date, hour, source, &data)?;
     Ok(data)
 }
 

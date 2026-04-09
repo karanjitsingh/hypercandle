@@ -2,18 +2,19 @@ use anyhow::{bail, Result};
 use chrono::NaiveDate;
 use clap::Parser;
 use hl_candles::{candle, fetcher, parser, spot, DataSource, Market};
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::Path;
+
+const DATA_DIR: &str = "data";
 
 #[derive(Parser)]
 #[command(name = "hl-candles", about = "Build candle data from Hyperliquid S3 fills")]
 struct Cli {
-    /// Coin symbol (e.g. BTC, ETH, SOL, HYPE, DOGE)
+    /// Coin symbol (e.g. BTC, ETH, SOL for perp; BTCUSDC, ETHUSDC for spot)
     #[arg(long)]
     coin: String,
 
-    /// Market type: perp or spot
-    /// For perp, --coin is used directly (e.g. BTC, ETH).
-    /// For spot, --coin should be a pair like BTCUSDC, ETHUSDC.
+    /// Market type
     #[arg(long, value_enum, default_value = "perp")]
     market: Market,
 
@@ -28,14 +29,6 @@ struct Cli {
     /// Candle interval: 1m, 5m, 15m, 1h, 4h, 1d
     #[arg(long, default_value = "1h")]
     interval: String,
-
-    /// Cache directory for downloaded S3 objects
-    #[arg(long, default_value = "cache")]
-    cache_dir: PathBuf,
-
-    /// Output format: json or csv
-    #[arg(long, default_value = "json")]
-    format: String,
 }
 
 #[tokio::main]
@@ -54,22 +47,28 @@ async fn main() -> Result<()> {
         bail!("end date must be >= start date");
     }
 
-    // Resolve the coin identifier
-    let coin = match cli.market {
+    // Resolve coin identifier
+    let (coin, coin_label) = match cli.market {
         Market::Perp => {
             let c = cli.coin.to_uppercase();
             eprintln!("market: perp, coin: {c}");
-            c
+            (c.clone(), c)
         }
         Market::Spot => {
+            let label = cli.coin.to_uppercase();
             let resolved = spot::resolve_spot_coin(&cli.coin).await?;
-            eprintln!("market: spot, pair: {} -> {resolved}", cli.coin.to_uppercase());
-            resolved
+            eprintln!("market: spot, pair: {label} -> {resolved}");
+            (resolved, label)
         }
     };
 
+    let market_str = match cli.market {
+        Market::Perp => "perp",
+        Market::Spot => "spot",
+    };
+
+    let data_dir = Path::new(DATA_DIR);
     let client = fetcher::create_client().await;
-    let mut all_trades = Vec::new();
 
     let mut date = start;
     while date <= end {
@@ -78,37 +77,46 @@ async fn main() -> Result<()> {
         if date == start || DataSource::for_date(&(date - chrono::Duration::days(1)).format("%Y%m%d").to_string()) != source {
             eprintln!("source: {:?} for {date_str}", source);
         }
+
+        let mut day_trades = Vec::new();
         for hour in 0..24u8 {
-            match fetcher::fetch_hourly(&client, &cli.cache_dir, &date_str, hour, source).await {
-                Ok(data) => {
-                    let trades = parser::parse_fills(&data, &coin, source)?;
+            match fetcher::fetch_hourly(&client, data_dir, &date_str, hour, source).await {
+                Ok(raw) => {
+                    let trades = parser::parse_fills(&raw, &coin, source)?;
                     eprintln!("  {date_str}/{hour}: {} trades", trades.len());
-                    all_trades.extend(trades);
+                    day_trades.extend(trades);
                 }
                 Err(e) => {
                     eprintln!("  {date_str}/{hour}: skipped ({e:#})");
                 }
             }
         }
-        date += chrono::Duration::days(1);
-    }
 
-    all_trades.sort_by_key(|t| t.time_ms);
-    let candles = candle::aggregate(&all_trades, interval_ms);
-    eprintln!("\n{} candles generated", candles.len());
+        day_trades.sort_by_key(|t| t.time_ms);
+        let candles = candle::aggregate(&day_trades, interval_ms);
 
-    match cli.format.as_str() {
-        "json" => println!("{}", serde_json::to_string_pretty(&candles)?),
-        "csv" => {
-            println!("open_time,close_time,open,high,low,close,volume,trades");
+        if !candles.is_empty() {
+            let out_dir = data_dir
+                .join("candles")
+                .join(market_str)
+                .join(&coin_label)
+                .join(&cli.interval);
+            std::fs::create_dir_all(&out_dir)?;
+            let out_path = out_dir.join(format!("{date_str}.csv"));
+
+            let mut f = std::fs::File::create(&out_path)?;
+            writeln!(f, "open_time,close_time,open,high,low,close,volume,trades")?;
             for c in &candles {
-                println!(
+                writeln!(
+                    f,
                     "{},{},{},{},{},{},{},{}",
                     c.open_time, c.close_time, c.open, c.high, c.low, c.close, c.volume, c.trades
-                );
+                )?;
             }
+            eprintln!("  wrote {} candles -> {}", candles.len(), out_path.display());
         }
-        _ => bail!("unknown format: {}", cli.format),
+
+        date += chrono::Duration::days(1);
     }
 
     Ok(())

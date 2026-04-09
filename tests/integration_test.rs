@@ -115,13 +115,14 @@ fn perp_and_spot_are_different() {
 fn cache_roundtrip() {
     let dir = tempfile::tempdir().unwrap();
     let data = b"test data";
-    let path = hl_candles::cache::write_cache(dir.path(), "20250801", 0, data).unwrap();
+    let source = DataSource::FillsByBlock;
+    let path = hl_candles::cache::write_cache(dir.path(), "20250801", 0, source, data).unwrap();
     assert!(path.exists());
     assert_eq!(std::fs::read(&path).unwrap(), data);
 
-    let cached = hl_candles::cache::get_cached(dir.path(), "20250801", 0);
+    let cached = hl_candles::cache::get_cached(dir.path(), "20250801", 0, source);
     assert!(cached.is_some());
     assert_eq!(cached.unwrap(), path);
 
-    assert!(hl_candles::cache::get_cached(dir.path(), "20250801", 1).is_none());
+    assert!(hl_candles::cache::get_cached(dir.path(), "20250801", 1, source).is_none());
 }
