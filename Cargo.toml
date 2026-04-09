@@ -1,15 +1,15 @@
 [package]
-name = "hl-candles"
+name = "hyperliquid-ohlcv"
 version = "0.1.0"
 edition = "2021"
-description = "Fetch and build BTC candle data from Hyperliquid's historical S3 data"
+description = "Build OHLCV candle data from Hyperliquid's historical S3 fills"
 
 [lib]
 name = "hl_candles"
 path = "src/lib.rs"
 
 [[bin]]
-name = "hl-candles"
+name = "hypercandle"
 path = "src/main.rs"
 
 [dependencies]

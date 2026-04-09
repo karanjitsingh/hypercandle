@@ -14,7 +14,7 @@ const DATA_DIR: &str = "data";
 
 #[derive(Parser)]
 #[command(
-    name = "hl-candles",
+    name = "hypercandle",
     about = "Build candle data from Hyperliquid S3 fills"
 )]
 struct Cli {

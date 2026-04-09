@@ -1,6 +1,6 @@
 # hyperliquid-ohlcv
 
-Rust CLI tool and library to build candle (OHLCV) data from [Hyperliquid's](https://hyperliquid.xyz) historical S3 fills data. Works for any coin — perp or spot.
+Rust CLI tool and library to build candle (OHLCV) data from [Hyperliquid's](https://hyperliquid.xyz) historical S3 fills data.
 
 ## How it works
 
@@ -10,7 +10,6 @@ Each downloaded file is cached locally so subsequent runs don't re-download (the
 
 ## Prerequisites
 
-- Rust toolchain (1.91+)
 - AWS credentials configured (any method — env vars, `~/.aws/credentials`, SSO, etc.)
   - You pay S3 transfer costs (requester-pays bucket)
 
@@ -24,36 +23,36 @@ Download hourly LZ4 files to local cache without building candles.
 
 ```bash
 # Fetch a single day
-hl-candles fetch --start 20250801
+hypercandle fetch --start 20250801
 
 # Fetch a date range
-hl-candles fetch --start 20250801 --end 20250831
+hypercandle fetch --start 20250801 --end 20250831
 ```
 
 ### `build` — Build candles from S3 fills
 
 ```bash
 # BTC perp 1-minute candles for a single day
-hl-candles build --coin BTC --start 20250801 --interval 1m
+hypercandle build --coin BTC --start 20250801 --interval 1m
 
 # ETH perp 1-hour candles for a date range
-hl-candles build --coin ETH --start 20250801 --end 20250803 --interval 1h
+hypercandle build --coin ETH --start 20250801 --end 20250803 --interval 1h
 
 # BTC spot (BTCUSDC) 1-minute candles
-hl-candles build --coin BTCUSDC --market spot --start 20250801 --interval 1m
+hypercandle build --coin BTCUSDC --market spot --start 20250801 --interval 1m
 
 # HYPE spot candles
-hl-candles build --coin HYPEUSDC --market spot --start 20260401 --interval 1h
+hypercandle build --coin HYPEUSDC --market spot --start 20260401 --interval 1h
 ```
 
 ### `consolidate` — Merge smaller candles into larger intervals
 
 ```bash
 # Consolidate 1m candles into 30m
-hl-candles consolidate --coin BTC --start 20250801 --end 20250831 --from 1m --to 30m
+hypercandle consolidate --coin BTC --start 20250801 --end 20250831 --from 1m --to 30m
 
 # Consolidate 1m candles into 1h
-hl-candles consolidate --coin BTC --start 20250801 --end 20250831 --from 1m --to 1h
+hypercandle consolidate --coin BTC --start 20250801 --end 20250831 --from 1m --to 1h
 ```
 
 ### Options
