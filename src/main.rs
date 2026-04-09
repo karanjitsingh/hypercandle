@@ -20,6 +20,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Fetch raw S3 fills data to local cache (no candle building)
+    Fetch {
+        #[arg(long)]
+        start: String,
+        #[arg(long)]
+        end: Option<String>,
+    },
     /// Build candles from S3 fills data
     Build {
         #[arg(long)]
@@ -80,6 +87,9 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Command::Fetch { start, end } => {
+            cmd_fetch(start, end).await
+        }
         Command::Build { coin, market, start, end, interval } => {
             cmd_build(coin, market, start, end, interval).await
         }
@@ -87,6 +97,53 @@ async fn main() -> Result<()> {
             cmd_consolidate(coin, market, start, end, from, to)
         }
     }
+}
+
+async fn cmd_fetch(start: String, end: Option<String>) -> Result<()> {
+    let start = NaiveDate::parse_from_str(&start, "%Y%m%d")?;
+    let end = match &end {
+        Some(e) => NaiveDate::parse_from_str(e, "%Y%m%d")?,
+        None => start,
+    };
+    if end < start { bail!("end date must be >= start date"); }
+
+    let data_dir = Path::new(DATA_DIR);
+    let client = fetcher::create_client().await;
+    let mut downloaded = 0u32;
+    let mut cached = 0u32;
+    let mut failed = 0u32;
+
+    let mut date = start;
+    while date <= end {
+        let date_str = date.format("%Y%m%d").to_string();
+        let sources = DataSource::for_date(&date_str);
+
+        for hour in 0..24u8 {
+            let mut found = false;
+            for &source in &sources {
+                if hl_candles::cache::get_cached(data_dir, &date_str, hour, source).is_some() {
+                    cached += 1;
+                    found = true;
+                    break;
+                }
+                match fetcher::fetch_hourly(&client, data_dir, &date_str, hour, source).await {
+                    Ok(data) => {
+                        eprintln!("  {date_str}/{hour}: {} bytes ({:?})", data.len(), source);
+                        downloaded += 1;
+                        found = true;
+                        break;
+                    }
+                    Err(_) => continue,
+                }
+            }
+            if !found { failed += 1; }
+        }
+
+        date += chrono::Duration::days(1);
+    }
+
+    eprintln!("\nfetch complete: {downloaded} downloaded, {cached} cached, {failed} failed");
+    Ok(())
 }
 
 async fn cmd_build(
