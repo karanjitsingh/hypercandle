@@ -190,11 +190,15 @@ async fn cmd_build(
     let data_dir = Path::new(DATA_DIR);
     let client = fetcher::create_client().await;
 
+    let total_days = (end - start).num_days() + 1;
+    let mut day_num = 0i64;
+
     let mut date = start;
     while date <= end {
+        day_num += 1;
         let date_str = date.format("%Y%m%d").to_string();
         let sources = DataSource::for_date(&date_str);
-        eprintln!("source: {:?} for {date_str}", sources);
+        eprint!("[{day_num}/{total_days}] {date_str} ");
 
         let day_start = day_start_ms(date);
         let day_end = day_start + 86_400_000;
@@ -239,7 +243,6 @@ async fn cmd_build(
                 let spillover = parser::parse_fills(&raw, &coin, source)?;
                 let count = spillover.iter().filter(|t| t.time_ms < day_end).count();
                 if count > 0 {
-                    eprintln!("  +{next_date_str}/0: {count} spillover trades");
                     day_trades.extend(spillover);
                 }
                 break;
@@ -255,7 +258,9 @@ async fn cmd_build(
                 .join("candles").join(market_str).join(&coin_label)
                 .join(&interval).join(format!("{date_str}.csv"));
             write_candles(&out_path, &candles)?;
-            eprintln!("  wrote {} candles -> {}", candles.len(), out_path.display());
+            eprintln!("{} candles, {} trades", candles.len(), day_trades.len());
+        } else {
+            eprintln!("no trades");
         }
 
         date += chrono::Duration::days(1);

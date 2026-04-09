@@ -24,13 +24,12 @@ pub async fn fetch_hourly(
 ) -> Result<Vec<u8>> {
     // Check cache first — avoids S3 transfer costs
     if let Some(path) = cache::get_cached(data_dir, date, hour, source) {
-        eprintln!("cache hit: {date}/{hour}.lz4");
         return std::fs::read(&path).context("reading cached file");
     }
 
     let prefix = source.s3_prefix();
     let key = format!("{prefix}/{date}/{hour}.lz4");
-    eprintln!("downloading: s3://{S3_BUCKET}/{key}");
+    eprint!("↓");
 
     let resp = client
         .get_object()
