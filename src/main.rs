@@ -1,42 +1,58 @@
 use anyhow::{bail, Result};
 use chrono::NaiveDate;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use hl_candles::{candle, fetcher, parser, spot, DataSource, Market};
 use std::io::Write;
 use std::path::Path;
 
 /// All data lives under this directory:
-/// - `data/s3/...`      — cached raw S3 downloads (LZ4 compressed)
-/// - `data/candles/...`  — generated candle CSVs
+/// - `data/s3/...`           — cached raw S3 downloads (LZ4 compressed)
+/// - `data/candles/...`      — candles built from raw fills
+/// - `data/consolidated/...` — candles consolidated from smaller intervals
 const DATA_DIR: &str = "data";
 
 #[derive(Parser)]
 #[command(name = "hl-candles", about = "Build candle data from Hyperliquid S3 fills")]
 struct Cli {
-    /// Coin symbol. For perp: BTC, ETH, SOL, etc.
-    /// For spot: pair name like BTCUSDC, ETHUSDC, HYPEUSDC.
-    #[arg(long)]
-    coin: String,
-
-    /// Market type. Perp uses coin name directly. Spot resolves the pair
-    /// name to an @index via the Hyperliquid spotMeta API.
-    #[arg(long, value_enum, default_value = "perp")]
-    market: Market,
-
-    /// Start date (YYYYMMDD)
-    #[arg(long)]
-    start: String,
-
-    /// End date inclusive (YYYYMMDD), defaults to start
-    #[arg(long)]
-    end: Option<String>,
-
-    /// Candle interval: 1m, 5m, 15m, 1h, 4h, 1d
-    #[arg(long, default_value = "1h")]
-    interval: String,
+    #[command(subcommand)]
+    command: Command,
 }
 
-/// Epoch ms for 00:00:00.000 UTC of the given date.
+#[derive(Subcommand)]
+enum Command {
+    /// Build candles from S3 fills data
+    Build {
+        #[arg(long)]
+        coin: String,
+        #[arg(long, value_enum, default_value = "perp")]
+        market: Market,
+        #[arg(long)]
+        start: String,
+        #[arg(long)]
+        end: Option<String>,
+        /// Candle interval: 1m, 5m, 15m, 1h, 4h, 1d
+        #[arg(long, default_value = "1h")]
+        interval: String,
+    },
+    /// Consolidate smaller-interval candles into a larger interval
+    Consolidate {
+        #[arg(long)]
+        coin: String,
+        #[arg(long, value_enum, default_value = "perp")]
+        market: Market,
+        #[arg(long)]
+        start: String,
+        #[arg(long)]
+        end: Option<String>,
+        /// Source interval to read from (e.g. 5m)
+        #[arg(long)]
+        from: String,
+        /// Target interval to consolidate into (e.g. 1h, 4h, 1d)
+        #[arg(long)]
+        to: String,
+    },
+}
+
 fn day_start_ms(date: NaiveDate) -> u64 {
     date.and_hms_opt(0, 0, 0)
         .unwrap()
@@ -44,62 +60,75 @@ fn day_start_ms(date: NaiveDate) -> u64 {
         .timestamp_millis() as u64
 }
 
+fn write_candles(path: &Path, candles: &[candle::Candle]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut f = std::fs::File::create(path)?;
+    writeln!(f, "open_time,close_time,open,high,low,close,volume,trades")?;
+    for c in candles {
+        writeln!(
+            f, "{},{},{},{},{},{},{},{}",
+            c.open_time, c.close_time, c.open, c.high, c.low, c.close, c.volume, c.trades
+        )?;
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let interval_ms = candle::parse_interval(&cli.interval)
-        .ok_or_else(|| anyhow::anyhow!("invalid interval: {}", cli.interval))?;
+    match cli.command {
+        Command::Build { coin, market, start, end, interval } => {
+            cmd_build(coin, market, start, end, interval).await
+        }
+        Command::Consolidate { coin, market, start, end, from, to } => {
+            cmd_consolidate(coin, market, start, end, from, to)
+        }
+    }
+}
 
-    let start = NaiveDate::parse_from_str(&cli.start, "%Y%m%d")?;
-    let end = match &cli.end {
+async fn cmd_build(
+    coin_arg: String, market: Market, start: String, end: Option<String>, interval: String,
+) -> Result<()> {
+    let interval_ms = candle::parse_interval(&interval)
+        .ok_or_else(|| anyhow::anyhow!("invalid interval: {interval}"))?;
+
+    let start = NaiveDate::parse_from_str(&start, "%Y%m%d")?;
+    let end = match &end {
         Some(e) => NaiveDate::parse_from_str(e, "%Y%m%d")?,
         None => start,
     };
-    if end < start {
-        bail!("end date must be >= start date");
-    }
+    if end < start { bail!("end date must be >= start date"); }
 
-    // Resolve the coin identifier.
-    // Perp: use as-is (e.g. "BTC"). Spot: resolve pair name to @index.
-    let (coin, coin_label) = match cli.market {
+    let (coin, coin_label) = match market {
         Market::Perp => {
-            let c = cli.coin.to_uppercase();
+            let c = coin_arg.to_uppercase();
             eprintln!("market: perp, coin: {c}");
             (c.clone(), c)
         }
         Market::Spot => {
-            let label = cli.coin.to_uppercase();
-            let resolved = spot::resolve_spot_coin(&cli.coin).await?;
+            let label = coin_arg.to_uppercase();
+            let resolved = spot::resolve_spot_coin(&coin_arg).await?;
             eprintln!("market: spot, pair: {label} -> {resolved}");
             (resolved, label)
         }
     };
 
-    let market_str = match cli.market {
-        Market::Perp => "perp",
-        Market::Spot => "spot",
-    };
-
+    let market_str = match market { Market::Perp => "perp", Market::Spot => "spot" };
     let data_dir = Path::new(DATA_DIR);
     let client = fetcher::create_client().await;
 
-    // Process one day at a time. Each day produces one CSV file.
     let mut date = start;
     while date <= end {
         let date_str = date.format("%Y%m%d").to_string();
-
-        // Get the data source(s) for this date. On transition dates (20250525,
-        // 20250727) multiple sources are returned — we try each per hour and
-        // use the first that has data.
         let sources = DataSource::for_date(&date_str);
         eprintln!("source: {:?} for {date_str}", sources);
 
-        // Day boundaries in epoch ms for filtering trades.
         let day_start = day_start_ms(date);
-        let day_end = day_start + 86_400_000; // exclusive
+        let day_end = day_start + 86_400_000;
 
-        // Fetch all 24 hours, trying each source until one succeeds.
         let mut day_trades = Vec::new();
         for hour in 0..24u8 {
             let mut found = false;
@@ -115,14 +144,10 @@ async fn main() -> Result<()> {
                     Err(_) => continue,
                 }
             }
-            if !found {
-                eprintln!("  {date_str}/{hour}: no data in any source");
-            }
+            if !found { eprintln!("  {date_str}/{hour}: no data in any source"); }
         }
 
-        // S3 files are partitioned by block production time, not trade timestamp.
-        // The hour-0 file for the next day may contain trades timestamped in the
-        // last seconds of the current day. Peek at it to avoid losing those trades.
+        // Peek at next day's hour 0 for spillover trades
         let next_date = date + chrono::Duration::days(1);
         let next_date_str = next_date.format("%Y%m%d").to_string();
         let next_sources = DataSource::for_date(&next_date_str);
@@ -138,38 +163,70 @@ async fn main() -> Result<()> {
             }
         }
 
-        // Filter to exactly this day's time range [00:00:00.000, 23:59:59.999].
-        // This ensures each day produces exactly 24 hourly candles with no
-        // overlap between consecutive days, regardless of run order.
         day_trades.retain(|t| t.time_ms >= day_start && t.time_ms < day_end);
         day_trades.sort_by_key(|t| t.time_ms);
 
         let candles = candle::aggregate(&day_trades, interval_ms);
-
-        // Write candles to data/candles/{market}/{coin}/{interval}/{date}.csv
         if !candles.is_empty() {
-            let out_dir = data_dir
-                .join("candles")
-                .join(market_str)
-                .join(&coin_label)
-                .join(&cli.interval);
-            std::fs::create_dir_all(&out_dir)?;
-            let out_path = out_dir.join(format!("{date_str}.csv"));
-
-            let mut f = std::fs::File::create(&out_path)?;
-            writeln!(f, "open_time,close_time,open,high,low,close,volume,trades")?;
-            for c in &candles {
-                writeln!(
-                    f,
-                    "{},{},{},{},{},{},{},{}",
-                    c.open_time, c.close_time, c.open, c.high, c.low, c.close, c.volume, c.trades
-                )?;
-            }
+            let out_path = data_dir
+                .join("candles").join(market_str).join(&coin_label)
+                .join(&interval).join(format!("{date_str}.csv"));
+            write_candles(&out_path, &candles)?;
             eprintln!("  wrote {} candles -> {}", candles.len(), out_path.display());
         }
 
         date += chrono::Duration::days(1);
     }
+    Ok(())
+}
 
+fn cmd_consolidate(
+    coin_arg: String, market: Market, start: String, end: Option<String>,
+    from: String, to: String,
+) -> Result<()> {
+    let from_ms = candle::parse_interval(&from)
+        .ok_or_else(|| anyhow::anyhow!("invalid source interval: {from}"))?;
+    let to_ms = candle::parse_interval(&to)
+        .ok_or_else(|| anyhow::anyhow!("invalid target interval: {to}"))?;
+    if to_ms <= from_ms { bail!("target interval must be larger than source"); }
+    if to_ms % from_ms != 0 { bail!("target interval must be an even multiple of source"); }
+
+    let start = NaiveDate::parse_from_str(&start, "%Y%m%d")?;
+    let end = match &end {
+        Some(e) => NaiveDate::parse_from_str(e, "%Y%m%d")?,
+        None => start,
+    };
+    if end < start { bail!("end date must be >= start date"); }
+
+    let coin_label = coin_arg.to_uppercase();
+    let market_str = match market { Market::Perp => "perp", Market::Spot => "spot" };
+    let data_dir = Path::new(DATA_DIR);
+
+    let mut date = start;
+    while date <= end {
+        let date_str = date.format("%Y%m%d").to_string();
+        let src_path = data_dir
+            .join("candles").join(market_str).join(&coin_label)
+            .join(&from).join(format!("{date_str}.csv"));
+
+        if !src_path.exists() {
+            eprintln!("  {date_str}: no source file at {}", src_path.display());
+            date += chrono::Duration::days(1);
+            continue;
+        }
+
+        let source_candles = candle::read_csv(&src_path)?;
+        let consolidated = candle::consolidate(&source_candles, to_ms);
+
+        if !consolidated.is_empty() {
+            let out_path = data_dir
+                .join("consolidated").join(market_str).join(&coin_label)
+                .join(&to).join(format!("{date_str}.csv"));
+            write_candles(&out_path, &consolidated)?;
+            eprintln!("  {date_str}: {} -> {} candles ({})", source_candles.len(), consolidated.len(), out_path.display());
+        }
+
+        date += chrono::Duration::days(1);
+    }
     Ok(())
 }

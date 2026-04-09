@@ -93,3 +93,77 @@ pub fn parse_interval(s: &str) -> Option<u64> {
         _ => None,
     }
 }
+
+/// Consolidate smaller-interval candles into a larger interval.
+///
+/// Candles must be sorted by open_time. Re-buckets into the target interval:
+/// open from first sub-candle, close from last, high/low from extremes,
+/// volume and trades summed.
+pub fn consolidate(candles: &[Candle], target_interval_ms: u64) -> Vec<Candle> {
+    if candles.is_empty() {
+        return Vec::new();
+    }
+
+    let mut result: Vec<Candle> = Vec::new();
+    let mut current: Option<Candle> = None;
+
+    for c in candles {
+        let bucket_start = (c.open_time / target_interval_ms) * target_interval_ms;
+        let bucket_end = bucket_start + target_interval_ms - 1;
+
+        match current.as_mut() {
+            Some(cur) if cur.open_time == bucket_start => {
+                if c.high > cur.high { cur.high = c.high; }
+                if c.low < cur.low { cur.low = c.low; }
+                cur.close = c.close;
+                cur.volume += c.volume;
+                cur.trades += c.trades;
+            }
+            _ => {
+                if let Some(cur) = current.take() {
+                    result.push(cur);
+                }
+                current = Some(Candle {
+                    open_time: bucket_start,
+                    close_time: bucket_end,
+                    open: c.open,
+                    high: c.high,
+                    low: c.low,
+                    close: c.close,
+                    volume: c.volume,
+                    trades: c.trades,
+                });
+            }
+        }
+    }
+    if let Some(cur) = current {
+        result.push(cur);
+    }
+    result
+}
+
+/// Read candles from a CSV file.
+pub fn read_csv(path: &std::path::Path) -> anyhow::Result<Vec<Candle>> {
+    use std::io::BufRead;
+    use std::str::FromStr;
+    let file = std::fs::File::open(path)?;
+    let reader = std::io::BufReader::new(file);
+    let mut candles = Vec::new();
+    for (i, line) in reader.lines().enumerate() {
+        let line = line?;
+        if i == 0 { continue; } // skip header
+        let cols: Vec<&str> = line.split(',').collect();
+        if cols.len() < 8 { continue; }
+        candles.push(Candle {
+            open_time: cols[0].parse()?,
+            close_time: cols[1].parse()?,
+            open: Decimal::from_str(cols[2])?,
+            high: Decimal::from_str(cols[3])?,
+            low: Decimal::from_str(cols[4])?,
+            close: Decimal::from_str(cols[5])?,
+            volume: Decimal::from_str(cols[6])?,
+            trades: cols[7].parse()?,
+        });
+    }
+    Ok(candles)
+}
