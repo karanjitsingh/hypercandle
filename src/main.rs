@@ -196,9 +196,9 @@ async fn cmd_build(
     let mut date = start;
     while date <= end {
         day_num += 1;
+        let t0 = std::time::Instant::now();
         let date_str = date.format("%Y%m%d").to_string();
         let sources = DataSource::for_date(&date_str);
-        eprint!("[{day_num}/{total_days}] {date_str} ");
 
         let day_start = day_start_ms(date);
         let day_end = day_start + 86_400_000;
@@ -258,9 +258,11 @@ async fn cmd_build(
                 .join("candles").join(market_str).join(&coin_label)
                 .join(&interval).join(format!("{date_str}.csv"));
             write_candles(&out_path, &candles)?;
-            println!("{} candles, {} trades", candles.len(), day_trades.len());
+            let elapsed = t0.elapsed();
+            println!("[{day_num}/{total_days}] {date_str} {} candles, {} trades ({:.1}s)", candles.len(), day_trades.len(), elapsed.as_secs_f64());
         } else {
-            println!("no trades");
+            let elapsed = t0.elapsed();
+            println!("[{day_num}/{total_days}] {date_str} no trades ({:.1}s)", elapsed.as_secs_f64());
         }
 
         date += chrono::Duration::days(1);
