@@ -91,10 +91,31 @@ async fn main() -> anyhow::Result<()> {
 
 ## Data source
 
-- **Bucket**: `s3://hl-mainnet-node-data/node_fills_by_block/hourly/{YYYYMMDD}/{hour}.lz4`
-- **Format**: LZ4-compressed NDJSON, each line is a block with an `events` array of `[address, fill]` pairs
-- **Perp BTC**: `coin = "BTC"`
-- **Spot BTC**: `coin = "@142"` (spot pair index on mainnet)
+This tool uses fills from `hl-mainnet-node-data`. Below is a summary of all known Hyperliquid S3 buckets.
+
+### `s3://hl-mainnet-node-data` (ap-northeast-1, requester-pays)
+
+| Prefix | Content | Format |
+|--------|---------|--------|
+| `node_fills_by_block/hourly/{YYYYMMDD}/{hour}.lz4` | Trade fills grouped by block — **this is what we use**. Each line is a block with `events` array of `[address, fill]` pairs. Contains all coins (perp + spot). | LZ4 NDJSON |
+| `node_fills/` | Older fill format matching the API format | LZ4 NDJSON |
+| `node_trades/` | Older trade format (does NOT match API format) | LZ4 NDJSON |
+| `explorer_blocks/` | Historical explorer blocks (L1 block data) | LZ4 |
+| `replica_cmds/` | Historical L1 transactions | LZ4 |
+
+### `s3://hyperliquid-archive` (requester-pays, updated ~monthly)
+
+| Prefix | Content | Format |
+|--------|---------|--------|
+| `market_data/{date}/{hour}/l2Book/{COIN}.lz4` | L2 order book snapshots per coin | LZ4 |
+| `asset_ctxs/{date}.csv.lz4` | Asset context data (funding rates, open interest, etc.) | LZ4 CSV |
+
+### Notes
+
+- The archive bucket is updated infrequently (~monthly) with no guarantee of timeliness or completeness.
+- Hyperliquid does **not** provide historical candle data via S3 — you must build candles from fills yourself, which is what this tool does.
+- The `node_fills_by_block/hourly/` prefix is the current/recommended format. `node_fills` and `node_trades` are legacy.
+- **BTC contracts**: Perp uses `coin = "BTC"`, spot uses `coin = "@142"` (UBTC/USDC pair index on mainnet).
 - **Docs**: https://hyperliquid.gitbook.io/hyperliquid-docs/historical-data
 
 ## Tests
