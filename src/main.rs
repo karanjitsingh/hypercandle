@@ -264,10 +264,10 @@ async fn cmd_build(
                 .join(&interval).join(format!("{date_str}.csv"));
             write_candles(&out_path, &candles)?;
             let elapsed = t0.elapsed();
-            println!("[{day_num}/{total_days}] {date_str} {} candles, {} trades ({:.1}s, {fetched} fetched/{cached} cached)", candles.len(), day_trades.len(), elapsed.as_secs_f64());
+            println!("[{day_num}/{total_days}] {date_str} {} candles, {} trades ({:.1}s, total {:.1}s, {fetched} fetched/{cached} cached)", candles.len(), day_trades.len(), elapsed.as_secs_f64(), total_t0.elapsed().as_secs_f64());
         } else {
             let elapsed = t0.elapsed();
-            println!("[{day_num}/{total_days}] {date_str} no trades ({:.1}s, {fetched} fetched/{cached} cached)", elapsed.as_secs_f64());
+            println!("[{day_num}/{total_days}] {date_str} no trades ({:.1}s, total {:.1}s, {fetched} fetched/{cached} cached)", elapsed.as_secs_f64(), total_t0.elapsed().as_secs_f64());
         }
 
         date += chrono::Duration::days(1);
