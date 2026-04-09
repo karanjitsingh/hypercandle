@@ -80,43 +80,47 @@ async fn main() -> Result<()> {
     let mut date = start;
     while date <= end {
         let date_str = date.format("%Y%m%d").to_string();
-        let source = DataSource::for_date(&date_str);
-        if date == start || DataSource::for_date(&(date - chrono::Duration::days(1)).format("%Y%m%d").to_string()) != source {
-            eprintln!("source: {:?} for {date_str}", source);
-        }
+        let sources = DataSource::for_date(&date_str);
+        eprintln!("source: {:?} for {date_str}", sources);
 
         let day_start = day_start_ms(date);
         let day_end = day_start + 86_400_000; // exclusive
 
-        // Fetch all 24 hours for this day
+        // Fetch all 24 hours for this day, trying each source
         let mut day_trades = Vec::new();
         for hour in 0..24u8 {
-            match fetcher::fetch_hourly(&client, data_dir, &date_str, hour, source).await {
-                Ok(raw) => {
-                    let trades = parser::parse_fills(&raw, &coin, source)?;
-                    eprintln!("  {date_str}/{hour}: {} trades", trades.len());
-                    day_trades.extend(trades);
+            let mut found = false;
+            for &source in &sources {
+                match fetcher::fetch_hourly(&client, data_dir, &date_str, hour, source).await {
+                    Ok(raw) => {
+                        let trades = parser::parse_fills(&raw, &coin, source)?;
+                        eprintln!("  {date_str}/{hour}: {} trades ({:?})", trades.len(), source);
+                        day_trades.extend(trades);
+                        found = true;
+                        break;
+                    }
+                    Err(_) => continue,
                 }
-                Err(e) => {
-                    eprintln!("  {date_str}/{hour}: skipped ({e:#})");
-                }
+            }
+            if !found {
+                eprintln!("  {date_str}/{hour}: no data in any source");
             }
         }
 
         // Peek at next day's hour 0 to catch spillover trades belonging to this day
         let next_date = date + chrono::Duration::days(1);
         let next_date_str = next_date.format("%Y%m%d").to_string();
-        let next_source = DataSource::for_date(&next_date_str);
-        match fetcher::fetch_hourly(&client, data_dir, &next_date_str, 0, next_source).await {
-            Ok(raw) => {
-                let spillover = parser::parse_fills(&raw, &coin, next_source)?;
+        let next_sources = DataSource::for_date(&next_date_str);
+        for &source in &next_sources {
+            if let Ok(raw) = fetcher::fetch_hourly(&client, data_dir, &next_date_str, 0, source).await {
+                let spillover = parser::parse_fills(&raw, &coin, source)?;
                 let count = spillover.iter().filter(|t| t.time_ms < day_end).count();
                 if count > 0 {
                     eprintln!("  +{next_date_str}/0: {count} spillover trades");
+                    day_trades.extend(spillover);
                 }
-                day_trades.extend(spillover);
+                break;
             }
-            Err(_) => {} // next day might not exist yet
         }
 
         // Filter to only trades within this day's time range

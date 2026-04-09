@@ -29,13 +29,14 @@ impl DataSource {
         }
     }
 
-    pub fn for_date(date: &str) -> Self {
-        if date >= "20250727" {
-            DataSource::FillsByBlock
-        } else if date >= "20250525" {
-            DataSource::NodeFills
-        } else {
-            DataSource::NodeTrades
+    pub fn for_date(date: &str) -> Vec<Self> {
+        match date {
+            // Transition days: need both sources to cover all hours
+            "20250525" => vec![DataSource::NodeTrades, DataSource::NodeFills],
+            "20250727" => vec![DataSource::NodeFills, DataSource::FillsByBlock],
+            d if d < "20250525" => vec![DataSource::NodeTrades],
+            d if d < "20250727" => vec![DataSource::NodeFills],
+            _ => vec![DataSource::FillsByBlock],
         }
     }
 }
