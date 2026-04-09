@@ -31,6 +31,14 @@ struct Cli {
     interval: String,
 }
 
+/// Epoch ms for start of a UTC day.
+fn day_start_ms(date: NaiveDate) -> u64 {
+    date.and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_utc()
+        .timestamp_millis() as u64
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -47,7 +55,6 @@ async fn main() -> Result<()> {
         bail!("end date must be >= start date");
     }
 
-    // Resolve coin identifier
     let (coin, coin_label) = match cli.market {
         Market::Perp => {
             let c = cli.coin.to_uppercase();
@@ -78,6 +85,10 @@ async fn main() -> Result<()> {
             eprintln!("source: {:?} for {date_str}", source);
         }
 
+        let day_start = day_start_ms(date);
+        let day_end = day_start + 86_400_000; // exclusive
+
+        // Fetch all 24 hours for this day
         let mut day_trades = Vec::new();
         for hour in 0..24u8 {
             match fetcher::fetch_hourly(&client, data_dir, &date_str, hour, source).await {
@@ -92,7 +103,26 @@ async fn main() -> Result<()> {
             }
         }
 
+        // Peek at next day's hour 0 to catch spillover trades belonging to this day
+        let next_date = date + chrono::Duration::days(1);
+        let next_date_str = next_date.format("%Y%m%d").to_string();
+        let next_source = DataSource::for_date(&next_date_str);
+        match fetcher::fetch_hourly(&client, data_dir, &next_date_str, 0, next_source).await {
+            Ok(raw) => {
+                let spillover = parser::parse_fills(&raw, &coin, next_source)?;
+                let count = spillover.iter().filter(|t| t.time_ms < day_end).count();
+                if count > 0 {
+                    eprintln!("  +{next_date_str}/0: {count} spillover trades");
+                }
+                day_trades.extend(spillover);
+            }
+            Err(_) => {} // next day might not exist yet
+        }
+
+        // Filter to only trades within this day's time range
+        day_trades.retain(|t| t.time_ms >= day_start && t.time_ms < day_end);
         day_trades.sort_by_key(|t| t.time_ms);
+
         let candles = candle::aggregate(&day_trades, interval_ms);
 
         if !candles.is_empty() {

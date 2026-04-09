@@ -3,3 +3,5 @@
 /.cache
 # Allow test fixtures
 !tests/fixtures/**/*.lz4
+debug
+release
