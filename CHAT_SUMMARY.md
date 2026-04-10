@@ -60,7 +60,7 @@ data/
     node_fills/hourly/YYYYMMDD/H.lz4
     node_trades/hourly/YYYYMMDD/H.lz4
   candles/{market}/{coin}/{interval}/YYYYMMDD.csv    # Built from fills
-  consolidated/{market}/{coin}/{interval}/YYYYMMDD.csv  # Consolidated from smaller candles
+  consolidated/{market}/{coin}/{interval}.csv           # Consolidated across selected date range
 ```
 
 ## Commit history highlights

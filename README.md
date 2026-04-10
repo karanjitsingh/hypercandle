@@ -67,8 +67,8 @@ hypercandle consolidate --coin BTC --start 20250801 --end 20250831 --from 1m --t
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--start` | required | Start date (`YYYYMMDD`) |
-| `--end` | same as start | End date inclusive (`YYYYMMDD`) |
+| `--start` | all available | Start date (`YYYYMMDD`). If omitted, consolidate all available source dates |
+| `--end` | same as start | End date inclusive (`YYYYMMDD`). Without `--start`, acts as an upper bound |
 
 #### `build`
 
@@ -89,11 +89,11 @@ hypercandle consolidate --coin BTC --start 20250801 --end 20250831 --from 1m --t
 | `--start` | required | Start date (`YYYYMMDD`) |
 | `--end` | same as start | End date inclusive (`YYYYMMDD`) |
 | `--from` | required | Source interval to read from (e.g. `1m`) |
-| `--to` | required | Target interval to consolidate into (e.g. `30m`, `1h`, `1d`) |
+| `--to` | required | Target interval to consolidate into (same or larger than `--from`, e.g. `30m`, `1h`, `1d`) |
 
 ### Output
 
-Candles are written as CSV files to `data/candles/{market}/{coin}/{interval}/{date}.csv` (build) or `data/consolidated/{market}/{coin}/{interval}/{date}.csv` (consolidate).
+Candles are written as CSV files to `data/candles/{market}/{coin}/{interval}/{date}.csv` (build) or `data/consolidated/{market}/{coin}/{interval}.csv` (consolidate, single file across the selected date range).
 
 ```
 open_time,close_time,open,high,low,close,volume,trades

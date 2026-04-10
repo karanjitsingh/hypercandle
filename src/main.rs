@@ -3,13 +3,13 @@ use chrono::NaiveDate;
 use clap::{Parser, Subcommand};
 use hypercandle::{candle, fetcher, parser, spot, DataSource, Market};
 use rayon::prelude::*;
-use std::io::Write;
+use std::io::{BufWriter, Write};
 use std::path::Path;
 
 /// All data lives under this directory:
 /// - `data/s3/...`           — cached raw S3 downloads (LZ4 compressed)
 /// - `data/candles/...`      — candles built from raw fills
-/// - `data/consolidated/...` — candles consolidated from smaller intervals
+/// - `data/consolidated/...` — consolidated candles (single CSV per resolution)
 const DATA_DIR: &str = "data";
 
 #[derive(Parser)]
@@ -49,20 +49,22 @@ enum Command {
         #[arg(long, default_value = "1h")]
         interval: String,
     },
-    /// Consolidate smaller-interval candles into a larger interval
+    /// Consolidate candles into the same or larger interval
     Consolidate {
         #[arg(long)]
         coin: String,
         #[arg(long, value_enum, default_value = "perp")]
         market: Market,
+        /// Start date (`YYYYMMDD`). If omitted, uses all available source dates.
         #[arg(long)]
-        start: String,
+        start: Option<String>,
+        /// End date (`YYYYMMDD`). With no start, caps the auto-discovered range.
         #[arg(long)]
         end: Option<String>,
         /// Source interval to read from (e.g. 5m)
         #[arg(long)]
         from: String,
-        /// Target interval to consolidate into (e.g. 1h, 4h, 1d)
+        /// Target interval to consolidate into (e.g. 5m, 1h, 4h, 1d)
         #[arg(long)]
         to: String,
     },
@@ -79,7 +81,8 @@ fn write_candles(path: &Path, candles: &[candle::Candle]) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let mut f = std::fs::File::create(path)?;
+    let file = std::fs::File::create(path)?;
+    let mut f = BufWriter::new(file);
     writeln!(f, "open_time,close_time,open,high,low,close,volume,trades")?;
     for c in candles {
         writeln!(
@@ -88,6 +91,7 @@ fn write_candles(path: &Path, candles: &[candle::Candle]) -> Result<()> {
             c.open_time, c.close_time, c.open, c.high, c.low, c.close, c.volume, c.trades
         )?;
     }
+    f.flush()?;
     Ok(())
 }
 
@@ -316,7 +320,7 @@ async fn cmd_build(
 fn cmd_consolidate(
     coin_arg: String,
     market: Market,
-    start: String,
+    start: Option<String>,
     end: Option<String>,
     from: String,
     to: String,
@@ -325,20 +329,11 @@ fn cmd_consolidate(
         .ok_or_else(|| anyhow::anyhow!("invalid source interval: {from}"))?;
     let to_ms = candle::parse_interval(&to)
         .ok_or_else(|| anyhow::anyhow!("invalid target interval: {to}"))?;
-    if to_ms <= from_ms {
-        bail!("target interval must be larger than source");
+    if to_ms < from_ms {
+        bail!("target interval must be >= source");
     }
     if to_ms % from_ms != 0 {
         bail!("target interval must be an even multiple of source");
-    }
-
-    let start = NaiveDate::parse_from_str(&start, "%Y%m%d")?;
-    let end = match &end {
-        Some(e) => NaiveDate::parse_from_str(e, "%Y%m%d")?,
-        None => start,
-    };
-    if end < start {
-        bail!("end date must be >= start date");
     }
 
     let coin_label = coin_arg.to_uppercase();
@@ -347,43 +342,103 @@ fn cmd_consolidate(
         Market::Spot => "spot",
     };
     let data_dir = Path::new(DATA_DIR);
+    let source_dir = data_dir
+        .join("candles")
+        .join(market_str)
+        .join(&coin_label)
+        .join(&from);
 
-    let mut date = start;
-    while date <= end {
+    if !source_dir.exists() {
+        println!("no source directory found at {}", source_dir.display());
+        return Ok(());
+    }
+
+    let mut available_dates: Vec<NaiveDate> = std::fs::read_dir(&source_dir)?
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("csv") {
+                return None;
+            }
+            let stem = path.file_stem()?.to_str()?;
+            NaiveDate::parse_from_str(stem, "%Y%m%d").ok()
+        })
+        .collect();
+    available_dates.sort_unstable();
+
+    if available_dates.is_empty() {
+        println!("no source candles found in {}", source_dir.display());
+        return Ok(());
+    }
+
+    let end_date = match &end {
+        Some(e) => Some(NaiveDate::parse_from_str(e, "%Y%m%d")?),
+        None => None,
+    };
+
+    let selected_dates: Vec<NaiveDate> = if let Some(start_s) = &start {
+        let start_date = NaiveDate::parse_from_str(start_s, "%Y%m%d")?;
+        let effective_end = end_date.unwrap_or(start_date);
+        if effective_end < start_date {
+            bail!("end date must be >= start date");
+        }
+        available_dates
+            .into_iter()
+            .filter(|d| *d >= start_date && *d <= effective_end)
+            .collect()
+    } else {
+        available_dates
+            .into_iter()
+            .filter(|d| end_date.is_none_or(|e| *d <= e))
+            .collect()
+    };
+
+    if selected_dates.is_empty() {
+        println!("no source candles found for requested date range");
+        return Ok(());
+    }
+
+    let mut all_source_candles: Vec<candle::Candle> = Vec::new();
+    for date in selected_dates {
         let date_str = date.format("%Y%m%d").to_string();
-        let src_path = data_dir
-            .join("candles")
-            .join(market_str)
-            .join(&coin_label)
-            .join(&from)
-            .join(format!("{date_str}.csv"));
+        let src_path = source_dir.join(format!("{date_str}.csv"));
 
         if !src_path.exists() {
             println!("  {date_str}: no source file at {}", src_path.display());
-            date += chrono::Duration::days(1);
             continue;
         }
 
         let source_candles = candle::read_csv(&src_path)?;
-        let consolidated = candle::consolidate(&source_candles, to_ms);
-
-        if !consolidated.is_empty() {
-            let out_path = data_dir
-                .join("consolidated")
-                .join(market_str)
-                .join(&coin_label)
-                .join(&to)
-                .join(format!("{date_str}.csv"));
-            write_candles(&out_path, &consolidated)?;
-            println!(
-                "  {date_str}: {} -> {} candles ({})",
-                source_candles.len(),
-                consolidated.len(),
-                out_path.display()
-            );
-        }
-
-        date += chrono::Duration::days(1);
+        println!(
+            "  {date_str}: loaded {} source candles",
+            source_candles.len()
+        );
+        all_source_candles.extend(source_candles);
     }
+
+    if all_source_candles.is_empty() {
+        println!("no source candles found for requested date range");
+        return Ok(());
+    }
+
+    all_source_candles.sort_by_key(|c| c.open_time);
+    let consolidated = candle::consolidate(&all_source_candles, to_ms);
+    if consolidated.is_empty() {
+        println!("no consolidated candles produced");
+        return Ok(());
+    }
+
+    let out_path = data_dir
+        .join("consolidated")
+        .join(market_str)
+        .join(&coin_label)
+        .join(format!("{to}.csv"));
+    write_candles(&out_path, &consolidated)?;
+    println!(
+        "wrote {} -> {} candles ({})",
+        all_source_candles.len(),
+        consolidated.len(),
+        out_path.display()
+    );
     Ok(())
 }
